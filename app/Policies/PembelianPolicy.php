@@ -23,6 +23,8 @@ class PembelianPolicy
         return $user->id === $pembelian->user_id || $user->isAdmin() || $user->isPengurus();
     }
 
+    
+
     // ... metode policy lainnya (create, update, delete)
 
     /**
@@ -64,4 +66,6 @@ class PembelianPolicy
     {
         return false;
     }
+
+    
 }
