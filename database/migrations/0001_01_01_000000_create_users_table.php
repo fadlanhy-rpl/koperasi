@@ -18,7 +18,6 @@ return new class extends Migration
             $table->enum('role', ['admin', 'pengurus', 'anggota'])->default('anggota');
             $table->rememberToken();
             $table->timestamps();
-            // $table->string('profile_image_path')->nullable();
             $table->date('date_of_birth')->nullable();
         });
     }

@@ -8,6 +8,7 @@ use App\Models\UnitUsaha;
 use App\Models\HistoriStok;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
@@ -17,56 +18,47 @@ class ManajemenBarangController extends Controller
 {
     public function __construct()
     {
-        // Middleware sudah diterapkan pada level route group
-        // $this->middleware(['auth', 'role:admin,pengurus']);
+        $this->middleware('auth');
+        $this->middleware('role:pengurus');
     }
 
-    /**
-     * Display a listing of the resource.
-     */
     public function index(Request $request)
     {
         $query = Barang::with('unitUsaha:id,nama_unit_usaha');
-
+        
         if ($request->filled('search')) {
-            $searchTerm = $request->search;
-            $query->where(function($q) use ($searchTerm) {
-                $q->where('nama_barang', 'like', '%' . $searchTerm . '%')
-                  ->orWhere('kode_barang', 'like', '%' . $searchTerm . '%');
+            $search = $request->search;
+            $query->where(function($q) use ($search) {
+                $q->where('nama_barang', 'like', "%{$search}%")
+                  ->orWhere('kode_barang', 'like', "%{$search}%")
+                  ->orWhere('deskripsi', 'like', "%{$search}%");
             });
         }
-
+        
         if ($request->filled('unit_usaha_filter') && $request->unit_usaha_filter != '') {
             $query->where('unit_usaha_id', $request->unit_usaha_filter);
         }
-
+        
         $barangs = $query->orderBy('nama_barang')->paginate(15)->withQueryString();
         $unitUsahas = UnitUsaha::orderBy('nama_unit_usaha')->get(['id', 'nama_unit_usaha']);
-
+        
         if ($request->ajax()) {
             return response()->json([
                 'html' => view('pengurus.barang.partials._barang_table_rows', compact('barangs'))->render(),
-                'pagination' => (string) $barangs->links('vendor.pagination.tailwind-ajax') // Pastikan view ini ada atau gunakan default
+                'pagination' => $barangs->links()->render()
             ]);
         }
         
         return view('pengurus.barang.index', compact('barangs', 'unitUsahas'));
     }
 
-    /**
-     * Show the form for creating a new resource.
-     */
     public function create()
     {
         $unitUsahas = UnitUsaha::orderBy('nama_unit_usaha')->get(['id', 'nama_unit_usaha']);
-        // Daftar satuan yang umum, bisa juga diambil dari tabel/config jika lebih dinamis
-        $satuans = ['pcs', 'lusin', 'kg', 'liter', 'set', 'pak', 'dus', 'rim', 'botol', 'buah', 'meter', 'roll'];
+        $satuans = ['pcs', 'lusin', 'kg', 'liter', 'set', 'pak', 'dus', 'rim', 'botol', 'buah'];
         return view('pengurus.barang.create', compact('unitUsahas', 'satuans'));
     }
 
-    /**
-     * Store a newly created resource in storage.
-     */
     public function store(Request $request)
     {
         $validatedData = $request->validate([
@@ -78,33 +70,41 @@ class ManajemenBarangController extends Controller
             'stok' => ['required', 'integer', 'min:0'],
             'satuan' => ['required', 'string', 'max:50'],
             'deskripsi' => ['nullable', 'string', 'max:1000'],
+            'cropped_gambar_barang' => ['nullable', 'string'],
         ]);
 
-        // Generate kode_barang jika kosong
+        // Generate kode barang jika kosong
         if (empty($validatedData['kode_barang'])) {
             $unitUsaha = UnitUsaha::find($validatedData['unit_usaha_id']);
-            // Ambil 3 huruf awal dari nama unit usaha (alphanumeric)
-            $prefixUnit = strtoupper(Str::limit(preg_replace('/[^A-Za-z0-9]/', '', $unitUsaha->nama_unit_usaha ?? 'BRG'), 3, ''));
-            // Ambil 3 huruf awal dari nama barang (alphanumeric)
-            $prefixNama = strtoupper(Str::limit(preg_replace('/[^A-Za-z0-9]/', '', $validatedData['nama_barang']), 3, ''));
+            $prefixUnit = strtoupper(Str::substr(preg_replace('/[^A-Za-z0-9]/', '', $unitUsaha->nama_unit_usaha ?? 'BRG'), 0, 3));
+            $prefixNama = strtoupper(Str::substr(preg_replace('/[^A-Za-z0-9]/', '', $validatedData['nama_barang']), 0, 3));
             
             do {
-                $randomSuffix = strtoupper(Str::random(4)); // Suffix random
-                $generatedCode = $prefixUnit . $prefixNama . $randomSuffix;
-                // Pastikan kode unik, jika tidak, generate lagi
+                $randomSuffix = strtoupper(Str::random(4));
+                $generatedCode = $prefixUnit . '-' . $prefixNama . '-' . $randomSuffix;
             } while (Barang::where('kode_barang', $generatedCode)->exists());
+            
             $validatedData['kode_barang'] = $generatedCode;
         }
 
         DB::beginTransaction();
         try {
+            // Handle gambar jika ada
+            $gambarPath = null;
+            if ($request->filled('cropped_gambar_barang')) {
+                $gambarPath = $this->handleImageUpload($request->input('cropped_gambar_barang'));
+            }
+            
+            $validatedData['gambar_path'] = $gambarPath;
+            unset($validatedData['cropped_gambar_barang']);
+
             $barang = Barang::create($validatedData);
 
-            // Jika stok awal > 0, catat di histori stok
+            // Buat histori stok awal jika stok > 0
             if ($barang->stok > 0) {
                 HistoriStok::create([
                     'barang_id' => $barang->id,
-                    'user_id' => Auth::id(), // User yang melakukan input
+                    'user_id' => Auth::id(),
                     'tipe' => 'masuk',
                     'jumlah' => $barang->stok,
                     'stok_sebelum' => 0,
@@ -112,50 +112,46 @@ class ManajemenBarangController extends Controller
                     'keterangan' => 'Stok awal saat penambahan barang',
                 ]);
             }
+
             DB::commit();
-            return redirect()->route('pengurus.barang.index')->with('success', "Barang '{$barang->nama_barang}' berhasil ditambahkan.");
+            return redirect()->route('pengurus.barang.index')->with('success', 'Barang baru berhasil ditambahkan.');
+            
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error("Gagal menambah barang: " . $e->getMessage() . "\nTrace:\n" . $e->getTraceAsString());
-            return redirect()->back()->withInput()->with('error', 'Gagal menambahkan barang: Terjadi kesalahan sistem.');
+            if ($gambarPath && Storage::disk('public')->exists($gambarPath)) {
+                Storage::disk('public')->delete($gambarPath);
+            }
+            Log::error("Gagal menambah barang: " . $e->getMessage());
+            return redirect()->back()->withInput()->with('error', 'Gagal menambahkan barang: ' . $e->getMessage());
         }
     }
 
-    /**
-     * Display the specified resource.
-     */
     public function show(Barang $barang, Request $request)
     {
         $barang->load('unitUsaha:id,nama_unit_usaha');
         $historiStoks = $barang->historiStoks()
-                                ->with('user:id,name') // Eager load user yang mencatat histori
-                                ->orderBy('created_at', 'desc') // Urutkan dari terbaru
-                                ->paginate(10, ['*'], 'page_histori') // Nama parameter paginasi unik
-                                ->withQueryString();
-        
-        if($request->ajax() && $request->has('page_histori')){ // Cek jika AJAX untuk paginasi histori
+            ->with('user:id,name')
+            ->orderBy('created_at', 'desc')
+            ->paginate(10, ['*'], 'page_histori')
+            ->withQueryString();
+            
+        if($request->ajax() && $request->has('page_histori')){
             return response()->json([
-                'html_histori' => view('pengurus.barang.partials._histori_stok_rows', compact('historiStoks'))->render(),
-                'pagination_histori' => (string) $historiStoks->links('vendor.pagination.tailwind-ajax')
+                'html' => view('pengurus.barang.partials._histori_stok_rows', compact('historiStoks'))->render(),
+                'pagination' => $historiStoks->links()->render()
             ]);
         }
-
+        
         return view('pengurus.barang.show', compact('barang', 'historiStoks'));
     }
 
-    /**
-     * Show the form for editing the specified resource.
-     */
     public function edit(Barang $barang)
     {
         $unitUsahas = UnitUsaha::orderBy('nama_unit_usaha')->get(['id', 'nama_unit_usaha']);
-        $satuans = ['pcs', 'lusin', 'kg', 'liter', 'set', 'pak', 'dus', 'rim', 'botol', 'buah', 'meter', 'roll'];
+        $satuans = ['pcs', 'lusin', 'kg', 'liter', 'set', 'pak', 'dus', 'rim', 'botol', 'buah'];
         return view('pengurus.barang.edit', compact('barang', 'unitUsahas', 'satuans'));
     }
 
-    /**
-     * Update the specified resource in storage.
-     */
     public function update(Request $request, Barang $barang)
     {
         $validatedData = $request->validate([
@@ -164,67 +160,136 @@ class ManajemenBarangController extends Controller
             'kode_barang' => ['nullable', 'string', 'max:50', Rule::unique('barangs', 'kode_barang')->ignore($barang->id)->whereNull('deleted_at')],
             'harga_beli' => ['required', 'numeric', 'min:0'],
             'harga_jual' => ['required', 'numeric', 'min:0', 'gte:harga_beli'],
-            // Stok tidak diupdate langsung di sini, tapi melalui Penyesuaian Stok.
-            // 'stok' => ['sometimes', 'required', 'integer', 'min:0'], 
             'satuan' => ['required', 'string', 'max:50'],
             'deskripsi' => ['nullable', 'string', 'max:1000'],
+            'cropped_gambar_barang' => ['nullable', 'string'],
+            'hapus_gambar_sekarang' => ['nullable', 'boolean'],
         ]);
 
-        // Jika kode barang dikosongkan saat update, dan sebelumnya sudah ada, biarkan kode lama.
-        // Jika kode barang dikosongkan dan sebelumnya juga kosong, generate baru.
-        if (empty($validatedData['kode_barang'])) {
-            if (!$barang->kode_barang) { // Jika kode barang sebelumnya juga kosong
-                $unitUsaha = UnitUsaha::find($validatedData['unit_usaha_id']);
-                $prefixUnit = strtoupper(Str::limit(preg_replace('/[^A-Za-z0-9]/', '', $unitUsaha->nama_unit_usaha ?? 'BRG'), 3, ''));
-                $prefixNama = strtoupper(Str::limit(preg_replace('/[^A-Za-z0-9]/', '', $validatedData['nama_barang']), 3, ''));
-                do {
-                    $generatedCode = $prefixUnit . $prefixNama . strtoupper(Str::random(4));
-                } while (Barang::where('kode_barang', $generatedCode)->where('id', '!=', $barang->id)->exists());
-                $validatedData['kode_barang'] = $generatedCode;
-            } else {
-                // Jika dikosongkan tapi sebelumnya ada, jangan ubah (tetap gunakan kode lama)
-                unset($validatedData['kode_barang']);
-            }
+        // Handle kode barang
+        if (empty($validatedData['kode_barang']) && !$barang->kode_barang) {
+            $unitUsaha = UnitUsaha::find($validatedData['unit_usaha_id']);
+            $prefixUnit = strtoupper(Str::substr(preg_replace('/[^A-Za-z0-9]/', '', $unitUsaha->nama_unit_usaha ?? 'BRG'), 0, 3));
+            $prefixNama = strtoupper(Str::substr(preg_replace('/[^A-Za-z0-9]/', '', $validatedData['nama_barang']), 0, 3));
+            
+            do {
+                $randomSuffix = strtoupper(Str::random(4));
+                $generatedCode = $prefixUnit . '-' . $prefixNama . '-' . $randomSuffix;
+            } while (Barang::where('kode_barang', $generatedCode)->where('id', '!=', $barang->id)->exists());
+            
+            $validatedData['kode_barang'] = $generatedCode;
+        } elseif(empty($validatedData['kode_barang']) && $barang->kode_barang) {
+            unset($validatedData['kode_barang']);
         }
-        
-        // Stok diupdate melalui menu Penyesuaian Stok, bukan dari form edit barang ini.
-        // Jika Anda ingin memperbolehkan update stok dari sini, ini harus dicatat sebagai 'penyesuaian'.
-        // if ($request->has('stok') && is_numeric($request->stok) && $request->stok != $barang->stok) {
-        //     // ... logika pencatatan HistoriStok untuk penyesuaian ...
-        //     $validatedData['stok'] = $request->stok;
-        // }
 
         DB::beginTransaction();
         try {
+            $gambarPathBaru = $barang->gambar_path;
+
+            // Handle penghapusan gambar jika dicentang
+            if ($request->boolean('hapus_gambar_sekarang') && $barang->gambar_path) {
+                if (Storage::disk('public')->exists($barang->gambar_path)) {
+                    Storage::disk('public')->delete($barang->gambar_path);
+                }
+                $gambarPathBaru = null;
+            }
+
+            // Handle upload gambar baru jika ada
+            if ($request->filled('cropped_gambar_barang')) {
+                // Hapus gambar lama jika ada dan akan diganti dengan yang baru
+                if ($barang->gambar_path && Storage::disk('public')->exists($barang->gambar_path)) {
+                    Storage::disk('public')->delete($barang->gambar_path);
+                }
+                $gambarPathBaru = $this->handleImageUpload($request->input('cropped_gambar_barang'));
+            }
+
+            $validatedData['gambar_path'] = $gambarPathBaru;
+            unset($validatedData['cropped_gambar_barang'], $validatedData['hapus_gambar_sekarang']);
+
             $barang->update($validatedData);
+            
             DB::commit();
-            return redirect()->route('pengurus.barang.index')->with('success', "Data barang '{$barang->nama_barang}' berhasil diperbarui.");
+            return redirect()->route('pengurus.barang.index')->with('success', 'Data barang berhasil diperbarui.');
+            
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error("Gagal update barang #{$barang->id}: " . $e->getMessage());
-            return redirect()->back()->withInput()->with('error', 'Gagal memperbarui data barang: Terjadi kesalahan sistem.');
+            return redirect()->back()->withInput()->with('error', 'Gagal memperbarui data barang: ' . $e->getMessage());
+        }
+    }
+
+    public function destroy(Barang $barang)
+    {
+        if ($barang->detailPembelians()->exists()) {
+            return redirect()->route('pengurus.barang.index')->with('error', 'Barang tidak dapat dihapus karena sudah digunakan dalam transaksi pembelian.');
+        }
+
+        DB::beginTransaction();
+        try {
+            // Hapus gambar dari storage sebelum menghapus record barang
+            if ($barang->gambar_path && Storage::disk('public')->exists($barang->gambar_path)) {
+                Storage::disk('public')->delete($barang->gambar_path);
+            }
+            
+            $barang->delete();
+            
+            DB::commit();
+            return redirect()->route('pengurus.barang.index')->with('success', 'Barang berhasil dihapus.');
+            
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error("Gagal hapus barang #{$barang->id}: " . $e->getMessage());
+            return redirect()->route('pengurus.barang.index')->with('error', 'Gagal menghapus barang.');
         }
     }
 
     /**
-     * Remove the specified resource from storage.
+     * Handle image upload from base64 data
      */
-    public function destroy(Barang $barang)
+    private function handleImageUpload($base64Data)
     {
-        if ($barang->detailPembelians()->exists()) {
-            return redirect()->route('pengurus.barang.index')->with('error', "Tidak dapat menghapus barang '{$barang->nama_barang}' karena sudah tercatat dalam transaksi pembelian. Anda bisa mengubah stoknya menjadi 0 jika tidak digunakan lagi.");
+        if (!$base64Data || !Str::startsWith($base64Data, 'data:image')) {
+            return null;
         }
-        
-        DB::beginTransaction();
-        try {
-            // Jika model Barang menggunakan SoftDeletes, ini akan melakukan soft delete.
-            $barang->delete(); 
-            DB::commit();
-            return redirect()->route('pengurus.barang.index')->with('success', "Barang '{$barang->nama_barang}' berhasil dihapus (dimasukkan ke arsip).");
-        } catch (\Exception $e) {
-            DB::rollBack();
-            Log::error("Gagal hapus barang #{$barang->id}: " . $e->getMessage());
-            return redirect()->route('pengurus.barang.index')->with('error', 'Gagal menghapus barang: Terjadi kesalahan sistem.');
+
+        // Extract image data
+        if (preg_match('/^data:image\/(\w+);base64,/', $base64Data, $type)) {
+            $imageData = substr($base64Data, strpos($base64Data, ',') + 1);
+            $fileExtension = strtolower($type[1]);
+
+            // Validate file extension
+            if (!in_array($fileExtension, ['jpg', 'jpeg', 'png', 'webp'])) {
+                throw new \Exception('Tipe file gambar tidak valid.');
+            }
+
+            // Decode base64
+            $imageData = base64_decode($imageData);
+            if ($imageData === false) {
+                throw new \Exception('Gagal decode data gambar base64.');
+            }
+
+            // Validate file size (max 2MB)
+            if (strlen($imageData) > (2 * 1024 * 1024)) {
+                throw new \Exception('Ukuran file gambar terlalu besar (Maksimal 2MB).');
+            }
+
+        } else {
+            throw new \Exception('Format data URI gambar tidak valid.');
         }
+
+        // Create directory if not exists
+        $directory = 'barang-photos';
+        if (!Storage::disk('public')->exists($directory)) {
+            Storage::disk('public')->makeDirectory($directory);
+        }
+
+        // Generate unique filename
+        $fileName = time() . '_' . Str::random(10) . '.' . $fileExtension;
+        $gambarPath = $directory . '/' . $fileName;
+
+        // Store the image
+        Storage::disk('public')->put($gambarPath, $imageData);
+
+        return $gambarPath;
     }
 }

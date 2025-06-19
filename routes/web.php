@@ -23,12 +23,16 @@ use App\Http\Controllers\Pengurus\PembayaranCicilanController;
 use App\Http\Controllers\Pengurus\LaporanPenjualanController;
 use App\Http\Controllers\Pengurus\LaporanSimpananController;
 use App\Http\Controllers\Pengurus\LaporanStokController;
+use App\Http\Controllers\Pengurus\StokExportController;
+
 
 // Anggota Controllers
 use App\Http\Controllers\Anggota\DashboardController as AnggotaDashboardController;
 use App\Http\Controllers\Anggota\ProfilAnggotaController;
 use App\Http\Controllers\Anggota\SimpananAnggotaController;
 use App\Http\Controllers\Anggota\PembelianAnggotaController;
+use App\Http\Controllers\Anggota\ProsesPembelianController
+;
 
 /*
 |--------------------------------------------------------------------------
@@ -67,6 +71,8 @@ Route::middleware('auth')->group(function () {
         Route::resource('manajemen-pengguna', ManajemenPenggunaController::class)->parameters([
             'manajemen-pengguna' => 'user' // Map parameter {manajemen_pengguna} ke $user
         ]);
+        Route::post('/pengurus/stok/{barang}/quick-update', [PencatatanStokController::class, 'quickStockUpdate'])
+        ->name('pengurus.stok.quickUpdate');
         
         Route::prefix('settings')->name('settings.')->controller(SettingController::class)->group(function () {
         Route::get('/', 'index')->name('index');
@@ -145,6 +151,9 @@ Route::middleware('auth')->group(function () {
                 Route::get('daftar-terkini', 'daftarStokTerkini')->name('daftarTerkini');
                 Route::get('kartu-stok/{barang}', 'kartuStokBarang')->name('kartuStok');
                 // Route::get('opname', [LaporanStokController::class, 'stokOpname'])->name('stokOpname'); // Contoh jika ada
+
+                // Route::get('showExportHistoryModal')->controller(StokExportController::class)->name('history');
+
             });
         });
     });
@@ -167,10 +176,14 @@ Route::middleware('auth')->group(function () {
 
         Route::get('simpanan', [SimpananAnggotaController::class, 'showSimpananSaya'])->name('simpanan.show');
 
-        Route::prefix('pembelian')->name('pembelian.')->controller(PembelianAnggotaController::class)->group(function() {
-            Route::get('riwayat', 'showRiwayatPembelianSaya')->name('riwayat');
-            Route::get('{pembelian}/detail', 'showDetailPembelianSaya')->name('detail');
-            Route::get('katalog', 'showKatalogBarang')->name('katalog');
-        });
+        Route::prefix('pembelian')->name('pembelian.')->group(function() { // Hapus ->controller() jika method ada di controller berbeda
+        Route::get('katalog', [PembelianAnggotaController::class, 'showKatalogBarang'])->name('katalog');
+        Route::get('riwayat', [PembelianAnggotaController::class, 'showRiwayatPembelianSaya'])->name('riwayat');
+        Route::get('{pembelian}/detail', [PembelianAnggotaController::class, 'showDetailPembelianSaya'])->name('detail');
+        
+        // Route baru untuk detail barang dan proses pembelian oleh anggota
+        Route::get('barang/{barang}/lihat', [ProsesPembelianController::class, 'showDetailBarang'])->name('barang.detail');
+        Route::post('barang/{barang}/beli-saldo', [ProsesPembelianController::class, 'prosesPembelianDenganSaldo'])->name('barang.beliSaldo');
+    });
     });
 });

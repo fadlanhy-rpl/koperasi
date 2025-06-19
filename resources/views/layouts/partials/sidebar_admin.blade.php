@@ -58,10 +58,10 @@
             <i class="fas fa-store w-5 h-5 mr-3 {{ request()->routeIs('pengurus.unit-usaha.*') ? '' : 'text-gray-400' }}"></i>
             <span>Manajemen Unit Usaha</span>
         </a>
-         <a href="{{ route('pengurus.barang.index') }}" class="nav-item {{ request()->routeIs('pengurus.barang.*') ? 'active' : '' }} flex items-center px-6 py-3 {{ request()->routeIs('pengurus.barang.*') ? 'text-blue-600 font-semibold' : 'text-gray-700 hover:text-blue-600 hover:bg-blue-50' }}">
+         {{-- <a href="{{ route('pengurus.barang.index') }}" class="nav-item {{ request()->routeIs('pengurus.barang.*') ? 'active' : '' }} flex items-center px-6 py-3 {{ request()->routeIs('pengurus.barang.*') ? 'text-blue-600 font-semibold' : 'text-gray-700 hover:text-blue-600 hover:bg-blue-50' }}">
             <i class="fas fa-boxes w-5 h-5 mr-3 {{ request()->routeIs('pengurus.barang.*') ? '' : 'text-gray-400' }}"></i>
             <span>Manajemen Barang</span>
-        </a>
+        </a> --}}
         
         <div class="px-6 py-2 mt-6">
             <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">LAPORAN</p>
