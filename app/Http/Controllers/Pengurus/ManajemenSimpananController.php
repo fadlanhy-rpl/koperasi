@@ -10,7 +10,7 @@ use App\Models\SimpananSukarela;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Carbon; // Menggunakan Illuminate\Support\Carbon
+use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\Log;
 
@@ -21,12 +21,36 @@ class ManajemenSimpananController extends Controller
         // Middleware sudah diterapkan pada level route group
     }
 
+    // Helper function untuk mengkonversi format currency ke angka
+    private function parseCurrency($value)
+    {
+        if (is_numeric($value)) {
+            return (float) $value;
+        }
+        
+        // Remove all non-numeric characters except decimal point
+        $cleaned = preg_replace('/[^\d.]/', '', $value);
+        return (float) $cleaned;
+    }
+
+    // Helper function untuk mendapatkan saldo terkini anggota
+    private function getCurrentBalance($userId)
+    {
+        $transaksiTerakhir = SimpananSukarela::where('user_id', $userId)
+                                            ->orderBy('tanggal_transaksi', 'desc')
+                                            ->orderBy('created_at', 'desc')
+                                            ->orderBy('id', 'desc')
+                                            ->first();
+        
+        return $transaksiTerakhir ? $transaksiTerakhir->saldo_sesudah : 0;
+    }
+
     // == SIMPANAN POKOK ==
     public function indexPokok(Request $request)
     {
         $query = User::where('role', 'anggota')
                      ->withSum('simpananPokoks as total_simpanan_pokok', 'jumlah')
-                     ->withCount('simpananPokoks as jumlah_setoran_pokok'); // Untuk mengetahui apakah sudah bayar
+                     ->withCount('simpananPokoks as jumlah_setoran_pokok');
 
         if ($request->filled('search_anggota')) {
             $searchTerm = $request->search_anggota;
@@ -46,12 +70,10 @@ class ManajemenSimpananController extends Controller
 
         $anggotas = $query->orderBy('name')->paginate(15)->withQueryString();
         
-        // Ambil daftar anggota yang belum punya simpanan pokok untuk dropdown di form
-        // Dengan asumsi simpanan pokok hanya sekali per anggota
         $anggotaBelumBayarPokok = User::where('role', 'anggota')
                                      ->whereDoesntHave('simpananPokoks')
                                      ->orderBy('name')
-                                     ->get(); // Ambil semua field untuk accessor jika digunakan
+                                     ->get();
 
         return view('pengurus.simpanan.pokok.index', compact('anggotas', 'anggotaBelumBayarPokok'));
     }
@@ -65,9 +87,11 @@ class ManajemenSimpananController extends Controller
             'keterangan' => ['nullable', 'string', 'max:255'],
         ]);
 
-        // Kebijakan: Simpanan pokok hanya sekali per anggota.
+        // Convert currency format to number
+        $validatedData['jumlah'] = $this->parseCurrency($validatedData['jumlah']);
+
         $existingPokok = SimpananPokok::where('user_id', $validatedData['user_id'])->first();
-        if ($existingPokok) { // Anda bisa menambahkan config untuk ini jika kebijakan bisa berubah
+        if ($existingPokok) {
              return redirect()->back()->withInput()->with('error', 'Anggota (' . User::find($validatedData['user_id'])->name . ') sudah memiliki simpanan pokok.');
         }
 
@@ -146,6 +170,9 @@ class ManajemenSimpananController extends Controller
             'keterangan' => ['nullable', 'string', 'max:255'],
         ]);
 
+        // Convert currency format to number
+        $validatedData['jumlah'] = $this->parseCurrency($validatedData['jumlah']);
+
         $exists = SimpananWajib::where('user_id', $validatedData['user_id'])
                                ->where('bulan', $validatedData['bulan'])
                                ->where('tahun', $validatedData['tahun'])
@@ -189,15 +216,18 @@ class ManajemenSimpananController extends Controller
         }
         $anggotas = $anggotaQuery->orderBy('name')->paginate(15)->withQueryString();
         
+        // Get current balance for each member with more accurate calculation
         $anggotas->getCollection()->transform(function ($anggota) {
-            $transaksiTerakhir = $anggota->simpananSukarelas()
-                                        ->orderBy('tanggal_transaksi', 'desc')
-                                        ->orderBy('created_at', 'desc')->orderBy('id', 'desc')->first();
-            $anggota->saldo_sukarela_terkini = $transaksiTerakhir ? $transaksiTerakhir->saldo_sesudah : 0;
+            $anggota->saldo_sukarela_terkini = $this->getCurrentBalance($anggota->id);
             return $anggota;
         });
         
+        // Get all members with their current balance for select options
         $semuaAnggota = User::where('role', 'anggota')->orderBy('name')->get();
+        $semuaAnggota->transform(function ($anggota) {
+            $anggota->saldo_sukarela_terkini = $this->getCurrentBalance($anggota->id);
+            return $anggota;
+        });
 
         return view('pengurus.simpanan.sukarela.index', compact('anggotas', 'semuaAnggota'));
     }
@@ -206,25 +236,28 @@ class ManajemenSimpananController extends Controller
     {
         $validatedData = $request->validate([
             'user_id' => ['required', Rule::exists('users', 'id')->where('role', 'anggota')],
-            'jumlah' => ['required', 'numeric', 'min:1'],
+            'jumlah' => ['required', 'string', 'min:1'],
             'tanggal_transaksi' => ['required', 'date_format:Y-m-d', 'before_or_equal:today'],
             'keterangan' => ['nullable', 'string', 'max:255'],
         ]);
 
+        // Convert currency format to number and validate
+        $jumlahSetoran = $this->parseCurrency($validatedData['jumlah']);
+        
+        if ($jumlahSetoran <= 0) {
+            return redirect()->back()->withInput()->with('error', 'Jumlah setoran harus lebih dari 0.');
+        }
+
         DB::beginTransaction();
         try {
             $user = User::find($validatedData['user_id']);
-            $transaksiTerakhir = SimpananSukarela::where('user_id', $user->id)
-                                                ->orderBy('tanggal_transaksi', 'desc')
-                                                ->orderBy('created_at', 'desc')->orderBy('id', 'desc')
-                                                ->first();
-            $saldoSebelum = $transaksiTerakhir ? $transaksiTerakhir->saldo_sesudah : 0;
-            $saldoSesudah = $saldoSebelum + $validatedData['jumlah'];
+            $saldoSebelum = $this->getCurrentBalance($user->id);
+            $saldoSesudah = $saldoSebelum + $jumlahSetoran;
 
             SimpananSukarela::create([
                 'user_id' => $user->id,
                 'tipe_transaksi' => 'setor',
-                'jumlah' => $validatedData['jumlah'],
+                'jumlah' => $jumlahSetoran,
                 'saldo_sebelum' => $saldoSebelum,
                 'saldo_sesudah' => $saldoSesudah,
                 'tanggal_transaksi' => $validatedData['tanggal_transaksi'],
@@ -233,7 +266,7 @@ class ManajemenSimpananController extends Controller
             ]);
 
             DB::commit();
-            return redirect()->route('pengurus.simpanan.sukarela.index')->with('success', 'Setoran simpanan sukarela berhasil dicatat.');
+            return redirect()->route('pengurus.simpanan.sukarela.index')->with('success', 'Setoran simpanan sukarela berhasil dicatat. Saldo baru: Rp ' . number_format($saldoSesudah, 0, ',', '.'));
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error("Gagal mencatat setoran sukarela: " . $e->getMessage());
@@ -245,31 +278,39 @@ class ManajemenSimpananController extends Controller
     {
         $validatedData = $request->validate([
             'user_id' => ['required', Rule::exists('users', 'id')->where('role', 'anggota')],
-            'jumlah' => ['required', 'numeric', 'min:1'],
+            'jumlah' => ['required', 'string', 'min:1'],
             'tanggal_transaksi' => ['required', 'date_format:Y-m-d', 'before_or_equal:today'],
             'keterangan' => ['nullable', 'string', 'max:255'],
         ]);
 
+        // Convert currency format to number and validate
+        $jumlahPenarikan = $this->parseCurrency($validatedData['jumlah']);
+        
+        if ($jumlahPenarikan <= 0) {
+            return redirect()->back()->withInput()->with('error', 'Jumlah penarikan harus lebih dari 0.');
+        }
+
         DB::beginTransaction();
         try {
             $user = User::find($validatedData['user_id']);
-            $transaksiTerakhir = SimpananSukarela::where('user_id', $user->id)
-                                                ->orderBy('tanggal_transaksi', 'desc')
-                                                ->orderBy('created_at', 'desc')->orderBy('id', 'desc')
-                                                ->first();
-            $saldoSebelum = $transaksiTerakhir ? $transaksiTerakhir->saldo_sesudah : 0;
+            
+            // Get current balance with lock to prevent race condition
+            $saldoSebelum = $this->getCurrentBalance($user->id);
 
-            if ($validatedData['jumlah'] > $saldoSebelum) {
+            // Validate sufficient balance with proper number comparison
+            if ($jumlahPenarikan > $saldoSebelum) {
                 DB::rollBack();
-                return redirect()->back()->withInput()->with('error', 'Jumlah penarikan (' . number_format($validatedData['jumlah']) . ') melebihi saldo sukarela yang tersedia (' . number_format($saldoSebelum) . ').');
+                return redirect()->back()->withInput()->with('error', 
+                    'Saldo tidak mencukupi. Saldo tersedia: Rp ' . number_format($saldoSebelum, 0, ',', '.') . 
+                    ', Jumlah penarikan: Rp ' . number_format($jumlahPenarikan, 0, ',', '.'));
             }
 
-            $saldoSesudah = $saldoSebelum - $validatedData['jumlah'];
+            $saldoSesudah = $saldoSebelum - $jumlahPenarikan;
 
             SimpananSukarela::create([
                 'user_id' => $user->id,
                 'tipe_transaksi' => 'tarik',
-                'jumlah' => $validatedData['jumlah'],
+                'jumlah' => $jumlahPenarikan,
                 'saldo_sebelum' => $saldoSebelum,
                 'saldo_sesudah' => $saldoSesudah,
                 'tanggal_transaksi' => $validatedData['tanggal_transaksi'],
@@ -278,11 +319,34 @@ class ManajemenSimpananController extends Controller
             ]);
 
             DB::commit();
-            return redirect()->route('pengurus.simpanan.sukarela.index')->with('success', 'Penarikan simpanan sukarela berhasil dicatat.');
+            return redirect()->route('pengurus.simpanan.sukarela.index')->with('success', 'Penarikan simpanan sukarela berhasil dicatat. Saldo baru: Rp ' . number_format($saldoSesudah, 0, ',', '.'));
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error("Gagal mencatat penarikan sukarela: " . $e->getMessage());
             return redirect()->back()->withInput()->with('error', 'Gagal mencatat penarikan sukarela. Silakan coba lagi.');
+        }
+    }
+
+    // API endpoint untuk mendapatkan saldo terkini anggota (untuk AJAX)
+    public function getSaldoAnggota(Request $request, $userId)
+    {
+        try {
+            $user = User::where('id', $userId)->where('role', 'anggota')->first();
+            
+            if (!$user) {
+                return response()->json(['error' => 'Anggota tidak ditemukan'], 404);
+            }
+
+            $saldo = $this->getCurrentBalance($userId);
+            
+            return response()->json([
+                'success' => true,
+                'saldo' => $saldo,
+                'saldo_formatted' => 'Rp ' . number_format($saldo, 0, ',', '.')
+            ]);
+        } catch (\Exception $e) {
+            Log::error("Error getting saldo anggota: " . $e->getMessage());
+            return response()->json(['error' => 'Terjadi kesalahan sistem'], 500);
         }
     }
 
@@ -304,8 +368,7 @@ class ManajemenSimpananController extends Controller
         
         $riwayat_sukarela = $anggota->simpananSukarelas()->with('pengurus:id,name')->orderBy('tanggal_transaksi', 'desc')->orderBy('created_at', 'desc')->orderBy('id', 'desc')->paginate(10, ['*'], 'page_sukarela')->withQueryString();
         $data['riwayat_sukarela'] = $riwayat_sukarela;
-        $transaksiTerakhirSukarela = $anggota->simpananSukarelas()->orderBy('tanggal_transaksi', 'desc')->orderBy('created_at', 'desc')->orderBy('id', 'desc')->first();
-        $data['saldo_sukarela_terkini'] = $transaksiTerakhirSukarela ? $transaksiTerakhirSukarela->saldo_sesudah : 0;
+        $data['saldo_sukarela_terkini'] = $this->getCurrentBalance($anggota->id);
 
         if ($request->ajax()) {
             $viewHtml = ''; $paginationHtml = ''; $tab = '';

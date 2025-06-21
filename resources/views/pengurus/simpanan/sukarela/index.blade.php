@@ -479,39 +479,12 @@
                         </thead>
                         <tbody class="divide-y divide-gray-100">
                             @php
-                                // Contoh data transaksi terbaru (ganti dengan data sebenarnya)
-                                $recentTransactions = collect([
-                                    (object)[
-                                        'tanggal_transaksi' => '2024-01-15',
-                                        'anggota' => (object)['name' => 'Ahmad Rizki'],
-                                        'jenis_transaksi' => 'setoran',
-                                        'jumlah' => 500000
-                                    ],
-                                    (object)[
-                                        'tanggal_transaksi' => '2024-01-14',
-                                        'anggota' => (object)['name' => 'Siti Nurhaliza'],
-                                        'jenis_transaksi' => 'penarikan',
-                                        'jumlah' => 200000
-                                    ],
-                                    (object)[
-                                        'tanggal_transaksi' => '2024-01-13',
-                                        'anggota' => (object)['name' => 'Budi Santoso'],
-                                        'jenis_transaksi' => 'setoran',
-                                        'jumlah' => 750000
-                                    ],
-                                    (object)[
-                                        'tanggal_transaksi' => '2024-01-12',
-                                        'anggota' => (object)['name' => 'Maya Sari'],
-                                        'jenis_transaksi' => 'setoran',
-                                        'jumlah' => 300000
-                                    ],
-                                    (object)[
-                                        'tanggal_transaksi' => '2024-01-11',
-                                        'anggota' => (object)['name' => 'Dedi Kurniawan'],
-                                        'jenis_transaksi' => 'penarikan',
-                                        'jumlah' => 150000
-                                    ]
-                                ]);
+                                // Get recent transactions from database
+                                $recentTransactions = \App\Models\SimpananSukarela::with('user')
+                                    ->orderBy('tanggal_transaksi', 'desc')
+                                    ->orderBy('created_at', 'desc')
+                                    ->limit(5)
+                                    ->get();
                             @endphp
                             
                             @forelse($recentTransactions as $transaksi)
@@ -520,10 +493,10 @@
                                         {{ \Carbon\Carbon::parse($transaksi->tanggal_transaksi)->format('d M Y') }}
                                     </td>
                                     <td class="py-3 px-4 font-medium text-gray-800">
-                                        {{ $transaksi->anggota->name ?? 'Anggota' }}
+                                        {{ $transaksi->user->name ?? 'Anggota' }}
                                     </td>
                                     <td class="py-3 px-4">
-                                        @if($transaksi->jenis_transaksi == 'setoran')
+                                        @if($transaksi->tipe_transaksi == 'setor')
                                             <span class="px-2 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
                                                 <i class="fas fa-arrow-up mr-1"></i>Setoran
                                             </span>
@@ -534,7 +507,7 @@
                                         @endif
                                     </td>
                                     <td class="py-3 px-4 text-right font-semibold">
-                                        @if($transaksi->jenis_transaksi == 'setoran')
+                                        @if($transaksi->tipe_transaksi == 'setor')
                                             <span class="text-green-600">+Rp {{ number_format($transaksi->jumlah, 0, ',', '.') }}</span>
                                         @else
                                             <span class="text-red-600">-Rp {{ number_format($transaksi->jumlah, 0, ',', '.') }}</span>

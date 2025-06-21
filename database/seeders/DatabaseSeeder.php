@@ -16,7 +16,7 @@ class DatabaseSeeder extends Seeder
             UserSeeder::class,
             UnitUsahaSeeder::class,
             BarangSeeder::class,
-            SimpananSeeder::class, // Panggil jika Anda membuatnya
+            SimpananSeeder::class,
             // Tambahkan seeder lain di sini jika ada
         ]);
     }

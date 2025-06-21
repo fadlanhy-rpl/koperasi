@@ -5,294 +5,154 @@ namespace App\Http\Controllers\Pengurus;
 use App\Http\Controllers\Controller;
 use App\Models\UnitUsaha;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class ManajemenUnitUsahaController extends Controller
 {
-    public function __construct()
-    {
-        $this->middleware(['auth', 'role:admin,pengurus']);
-    }
-
-    /**
-     * Display a listing of the resource.
-     */
     public function index(Request $request)
     {
+        $search = $request->input('search');
+        $perPage = $request->input('per_page', 10);
+        $viewMode = $request->input('view_mode', 'grid'); // Tambahkan view mode
+        
         $query = UnitUsaha::withCount('barangs');
 
-        if ($request->filled('search')) {
-            $searchTerm = $request->search;
-            $query->where(function($q) use ($searchTerm){
-                $q->where('nama_unit_usaha', 'like', '%' . $searchTerm . '%')
-                  ->orWhere('deskripsi', 'like', '%' . $searchTerm . '%');
+        if ($search) {
+            $query->where(function($q) use ($search) {
+                $q->where('nama_unit_usaha', 'like', "%{$search}%")
+                  ->orWhere('deskripsi', 'like', "%{$search}%");
             });
         }
 
-        $unitUsahas = $query->orderBy('nama_unit_usaha')->paginate(12)->withQueryString();
+        // Sorting
+        $sortBy = $request->input('sort_by', 'nama_unit_usaha');
+        $sortOrder = $request->input('sort_order', 'asc');
+        
+        $validSortColumns = ['nama_unit_usaha', 'created_at', 'barangs_count'];
+        if (in_array($sortBy, $validSortColumns)) {
+            if ($sortBy === 'barangs_count') {
+                $query->orderBy('barangs_count', $sortOrder);
+            } else {
+                $query->orderBy($sortBy, $sortOrder);
+            }
+        } else {
+            $query->orderBy('nama_unit_usaha', 'asc');
+        }
 
-        // Calculate statistics
+        $unitUsahas = $query->paginate($perPage)->appends($request->except('page'));
+
+        // Statistik global
+        $allUnits = UnitUsaha::withCount('barangs')->get();
         $stats = [
-            'total' => UnitUsaha::count(),
-            'totalBarang' => UnitUsaha::withCount('barangs')->get()->sum('barangs_count'),
-            'recentUnits' => UnitUsaha::where('created_at', '>=', now()->subDays(30))->count(),
-            'averageBarang' => UnitUsaha::count() > 0 ? 
-                round(UnitUsaha::withCount('barangs')->get()->avg('barangs_count'), 1) : 0
+            'total' => $allUnits->count(),
+            'totalBarang' => $allUnits->sum('barangs_count'),
+            'unitTerbaru' => UnitUsaha::where('created_at', '>=', now()->subDays(30))->count(),
+            'rataRataBarang' => $allUnits->count() > 0 ? round($allUnits->sum('barangs_count') / $allUnits->count(), 1) : 0
         ];
-
+        
         if ($request->ajax()) {
-            $viewMode = $request->get('view_mode', 'grid');
+            $html = '';
+            $gridHtml = '';
             
+            // Generate HTML berdasarkan view mode yang diminta
             if ($viewMode === 'table') {
                 $html = view('pengurus.unit_usaha.partials._unit_usaha_table_rows', compact('unitUsahas'))->render();
             } else {
-                $html = view('pengurus.unit_usaha.partials._unit_usaha_grid_cards', compact('unitUsahas'))->render();
+                $gridHtml = view('pengurus.unit_usaha.partials._unit_usaha_grid_items', compact('unitUsahas'))->render();
             }
-
+            
             return response()->json([
+                'success' => true,
                 'html' => $html,
-                'pagination' => (string) $unitUsahas->links('vendor.pagination.tailwind'),
+                'gridHtml' => $gridHtml,
+                'pagination' => $unitUsahas->links('vendor.pagination.tailwind')->render(),
                 'stats' => $stats,
-                'success' => true
+                'total' => $unitUsahas->total(),
+                'currentPage' => $unitUsahas->currentPage(),
+                'lastPage' => $unitUsahas->lastPage(),
+                'viewMode' => $viewMode
             ]);
         }
 
-        return view('pengurus.unit_usaha.index', compact('unitUsahas', 'stats'));
+        return view('pengurus.unit_usaha.index', compact('unitUsahas', 'search', 'stats'));
     }
 
-    /**
-     * Show the form for creating a new resource.
-     */
     public function create()
     {
         return view('pengurus.unit_usaha.create');
     }
 
-    /**
-     * Store a newly created resource in storage.
-     */
     public function store(Request $request)
     {
+        $validatedData = $request->validate([
+            'nama_unit_usaha' => 'required|string|max:255|unique:unit_usahas,nama_unit_usaha',
+            'deskripsi' => 'nullable|string|max:1000',
+        ], [
+            'nama_unit_usaha.required' => 'Nama unit usaha harus diisi.',
+            'nama_unit_usaha.unique' => 'Nama unit usaha sudah digunakan.',
+            'nama_unit_usaha.max' => 'Nama unit usaha maksimal 255 karakter.',
+            'deskripsi.max' => 'Deskripsi maksimal 1000 karakter.'
+        ]);
+
         try {
-            $validatedData = $request->validate([
-                'nama_unit_usaha' => [
-                    'required', 
-                    'string', 
-                    'max:255', 
-                    'unique:unit_usahas,nama_unit_usaha'
-                ],
-                'deskripsi' => ['nullable', 'string', 'max:1000'],
-            ], [
-                'nama_unit_usaha.required' => 'Nama unit usaha harus diisi.',
-                'nama_unit_usaha.unique' => 'Nama unit usaha sudah digunakan.',
-                'nama_unit_usaha.max' => 'Nama unit usaha maksimal 255 karakter.',
-                'deskripsi.max' => 'Deskripsi maksimal 1000 karakter.',
-            ]);
-
-            DB::beginTransaction();
-            
-            $unitUsaha = UnitUsaha::create($validatedData);
-            
-            DB::commit();
-
-            if ($request->ajax()) {
-                return response()->json([
-                    'success' => true,
-                    'message' => 'Unit usaha berhasil ditambahkan.',
-                    'data' => $unitUsaha,
-                    'redirect' => route('pengurus.unit-usaha.index')
-                ]);
-            }
-
+            UnitUsaha::create($validatedData);
             return redirect()->route('pengurus.unit-usaha.index')
-                ->with('success', 'Unit usaha "' . $unitUsaha->nama_unit_usaha . '" berhasil ditambahkan.');
-
-        } catch (\Illuminate\Validation\ValidationException $e) {
-            DB::rollBack();
-            
-            if ($request->ajax()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Data tidak valid.',
-                    'errors' => $e->errors()
-                ], 422);
-            }
-            
-            return back()->withErrors($e->errors())->withInput();
-            
+                           ->with('success', 'Unit usaha berhasil ditambahkan.');
         } catch (\Exception $e) {
-            DB::rollBack();
             Log::error('Error creating unit usaha: ' . $e->getMessage());
-            
-            if ($request->ajax()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Terjadi kesalahan saat menyimpan data.'
-                ], 500);
-            }
-            
-            return back()->with('error', 'Terjadi kesalahan saat menyimpan data.')->withInput();
+            return redirect()->back()
+                           ->withInput()
+                           ->with('error', 'Terjadi kesalahan saat menambahkan unit usaha.');
         }
     }
 
-    /**
-     * Show the form for editing the specified resource.
-     */
     public function edit(UnitUsaha $unitUsaha)
     {
-        if (request()->ajax()) {
-            return response()->json([
-                'success' => true,
-                'data' => $unitUsaha,
-                'html' => view('pengurus.unit_usaha.partials._edit_modal', compact('unitUsaha'))->render()
-            ]);
-        }
-
         return view('pengurus.unit_usaha.edit', compact('unitUsaha'));
     }
 
-    /**
-     * Update the specified resource in storage.
-     */
     public function update(Request $request, UnitUsaha $unitUsaha)
     {
+        $validatedData = $request->validate([
+            'nama_unit_usaha' => 'required|string|max:255|unique:unit_usahas,nama_unit_usaha,' . $unitUsaha->id,
+            'deskripsi' => 'nullable|string|max:1000',
+        ], [
+            'nama_unit_usaha.required' => 'Nama unit usaha harus diisi.',
+            'nama_unit_usaha.unique' => 'Nama unit usaha sudah digunakan.',
+            'nama_unit_usaha.max' => 'Nama unit usaha maksimal 255 karakter.',
+            'deskripsi.max' => 'Deskripsi maksimal 1000 karakter.'
+        ]);
+
         try {
-            $validatedData = $request->validate([
-                'nama_unit_usaha' => [
-                    'required', 
-                    'string', 
-                    'max:255', 
-                    Rule::unique('unit_usahas', 'nama_unit_usaha')->ignore($unitUsaha->id)
-                ],
-                'deskripsi' => ['nullable', 'string', 'max:1000'],
-            ], [
-                'nama_unit_usaha.required' => 'Nama unit usaha harus diisi.',
-                'nama_unit_usaha.unique' => 'Nama unit usaha sudah digunakan.',
-                'nama_unit_usaha.max' => 'Nama unit usaha maksimal 255 karakter.',
-                'deskripsi.max' => 'Deskripsi maksimal 1000 karakter.',
-            ]);
-
-            DB::beginTransaction();
-            
-            $oldName = $unitUsaha->nama_unit_usaha;
             $unitUsaha->update($validatedData);
-            
-            DB::commit();
-
-            if ($request->ajax()) {
-                return response()->json([
-                    'success' => true,
-                    'message' => 'Unit usaha berhasil diperbarui.',
-                    'data' => $unitUsaha->fresh(),
-                    'redirect' => route('pengurus.unit-usaha.index')
-                ]);
-            }
-
             return redirect()->route('pengurus.unit-usaha.index')
-                ->with('success', 'Unit usaha "' . $unitUsaha->nama_unit_usaha . '" berhasil diperbarui.');
-
-        } catch (\Illuminate\Validation\ValidationException $e) {
-            DB::rollBack();
-            
-            if ($request->ajax()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Data tidak valid.',
-                    'errors' => $e->errors()
-                ], 422);
-            }
-            
-            return back()->withErrors($e->errors())->withInput();
-            
+                           ->with('success', 'Unit usaha berhasil diperbarui.');
         } catch (\Exception $e) {
-            DB::rollBack();
             Log::error('Error updating unit usaha: ' . $e->getMessage());
-            
-            if ($request->ajax()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Terjadi kesalahan saat memperbarui data.'
-                ], 500);
-            }
-            
-            return back()->with('error', 'Terjadi kesalahan saat memperbarui data.')->withInput();
+            return redirect()->back()
+                           ->withInput()
+                           ->with('error', 'Terjadi kesalahan saat memperbarui unit usaha.');
         }
     }
-
-    /**
-     * Remove the specified resource from storage.
-     */
+    
     public function destroy(UnitUsaha $unitUsaha)
     {
         try {
-            DB::beginTransaction();
-            
-            // Check if unit has related items
-            $barangCount = $unitUsaha->barangs()->count();
-            
-            if ($barangCount > 0) {
-                if (request()->ajax()) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => "Tidak dapat menghapus unit usaha karena masih memiliki {$barangCount} barang terkait."
-                    ], 422);
-                }
-                
+            // Check if unit has related barangs
+            if ($unitUsaha->barangs()->exists()) {
                 return redirect()->route('pengurus.unit-usaha.index')
-                    ->with('error', "Tidak dapat menghapus unit usaha karena masih memiliki {$barangCount} barang terkait.");
+                               ->with('error', 'Gagal menghapus! Unit usaha masih memiliki barang terkait.');
             }
 
-            $unitName = $unitUsaha->nama_unit_usaha;
             $unitUsaha->delete();
-            
-            DB::commit();
-
-            if (request()->ajax()) {
-                return response()->json([
-                    'success' => true,
-                    'message' => "Unit usaha \"{$unitName}\" berhasil dihapus.",
-                    'redirect' => route('pengurus.unit-usaha.index')
-                ]);
-            }
 
             return redirect()->route('pengurus.unit-usaha.index')
-                ->with('success', "Unit usaha \"{$unitName}\" berhasil dihapus.");
+                           ->with('success', 'Unit usaha berhasil dihapus.');
 
         } catch (\Exception $e) {
-            DB::rollBack();
             Log::error('Error deleting unit usaha: ' . $e->getMessage());
-            
-            if (request()->ajax()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Terjadi kesalahan saat menghapus data.'
-                ], 500);
-            }
-            
             return redirect()->route('pengurus.unit-usaha.index')
-                ->with('error', 'Terjadi kesalahan saat menghapus data.');
+                           ->with('error', 'Terjadi kesalahan saat menghapus unit usaha.');
         }
-    }
-
-    /**
-     * Get unit usaha details for quick view
-     */
-    public function show(UnitUsaha $unitUsaha)
-    {
-        $unitUsaha->load(['barangs' => function($query) {
-            $query->latest()->take(5);
-        }]);
-
-        if (request()->ajax()) {
-            return response()->json([
-                'success' => true,
-                'data' => $unitUsaha,
-                'html' => view('pengurus.unit_usaha.partials._detail_modal', compact('unitUsaha'))->render()
-            ]);
-        }
-
-        return view('pengurus.unit_usaha.show', compact('unitUsaha'));
     }
 }

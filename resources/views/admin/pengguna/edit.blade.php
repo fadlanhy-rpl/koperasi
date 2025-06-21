@@ -1,388 +1,459 @@
-{{-- resources/views/anggota/profil/edit.blade.php --}}
 @extends('layouts.app')
 
-@section('title', 'Edit Profil Saya - Koperasi')
-@section('page-title', 'Edit Profil Akun')
-@section('page-subtitle', 'Perbarui informasi nama, password, dan foto profil Anda')
+@section('title', 'Edit Pengguna - Koperasi')
+@section('page-title', 'Edit Pengguna')
+@section('page-subtitle', 'Perbarui informasi pengguna sistem')
 
 @push('styles')
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css" rel="stylesheet">
-    <style>
-        .img-container-cropper {
-            width: 100%;
-            height: 350px;
-            background-color: #f3f4f6;
-            margin-bottom: 1rem;
-            border: 2px dashed #d1d5db;
-            border-radius: 0.75rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-        }
-
-        #imageToCropInModal {
-            display: block;
-            max-width: 100%;
-            max-height: 100%;
-        }
-
-        .preview-circle-container {
-            width: 150px;
-            height: 150px;
-            overflow: hidden;
-            border-radius: 50%;
-            border: 3px solid #3b82f6;
-            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
-            background-color: #f9fafb;
-            margin: 0 auto;
-        }
-
-        .cropper-view-box,
-        .cropper-face {
-            border-radius: 50%;
-        }
-
-        .visually-hidden {
-            position: absolute;
-            width: 1px;
-            height: 1px;
-            padding: 0;
-            margin: -1px;
-            overflow: hidden;
-            clip: rect(0, 0, 0, 0);
-            white-space: nowrap;
-            border-width: 0;
-        }
-
-        .profile-photo-current-edit {
-            width: 100px;
-            height: 100px;
-            border-radius: 50%;
-            object-fit: cover;
-            border: 3px solid #e5e7eb;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-        }
-
-        .form-input-style {
-            width: 100%;
-            padding: 0.75rem 1rem;
-            border: 1px solid #d1d5db;
-            border-radius: 0.5rem;
-            transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
-        }
-
-        .form-input-style:focus {
-            border-color: #3b82f6;
-            outline: 0;
-            box-shadow: 0 0 0 0.2rem rgba(59, 130, 246, 0.25);
-        }
-
-        .modal-overlay {
-            background: rgba(0, 0, 0, 0.6);
-            backdrop-filter: blur(3px);
-        }
-
-        .modal-content {
-            background: white;
-            border-radius: 1rem;
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-            max-width: 500px;
-            width: 90%;
-            max-height: 90vh;
-            overflow-y: auto;
-        }
-    </style>
+<style>
+    .form-container {
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.7));
+        backdrop-filter: blur(20px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 24px;
+        box-shadow: 0 8px 32px rgba(31, 38, 135, 0.37);
+    }
+    
+    .form-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 20px 20px 0 0;
+        padding: 2rem;
+        color: white;
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .form-header::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grain" width="100" height="100" patternUnits="userSpaceOnUse"><circle cx="25" cy="25" r="1" fill="white" opacity="0.1"/><circle cx="75" cy="75" r="1" fill="white" opacity="0.1"/></pattern></defs><rect width="100" height="100" fill="url(%23grain)"/></svg>');
+        opacity: 0.3;
+    }
+    
+    .current-avatar {
+        width: 80px;
+        height: 80px;
+        border-radius: 50%;
+        border: 3px solid rgba(255, 255, 255, 0.3);
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.1));
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 2rem;
+        font-weight: bold;
+        color: white;
+        position: relative;
+        z-index: 10;
+    }
+    
+    .current-avatar img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-radius: 50%;
+    }
+    
+    .form-group {
+        position: relative;
+        margin-bottom: 1.5rem;
+    }
+    
+    .form-input {
+        width: 100%;
+        padding: 1rem 1.25rem;
+        border: 2px solid #e5e7eb;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.9);
+        transition: all 0.3s ease;
+        font-size: 1rem;
+    }
+    
+    .form-input:focus {
+        border-color: #6366f1;
+        box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1);
+        outline: none;
+        background: white;
+    }
+    
+    .form-label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 600;
+        color: #374151;
+        font-size: 0.875rem;
+    }
+    
+    .form-label.required::after {
+        content: ' *';
+        color: #ef4444;
+    }
+    
+    .input-icon {
+        position: absolute;
+        left: 1rem;
+        top: 50%;
+        transform: translateY(-50%);
+        color: #9ca3af;
+        z-index: 10;
+    }
+    
+    .form-input.with-icon {
+        padding-left: 3rem;
+    }
+    
+    .btn-primary {
+        background: linear-gradient(135deg, #6366f1, #8b5cf6);
+        color: white;
+        padding: 1rem 2rem;
+        border-radius: 12px;
+        border: none;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .btn-primary:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(99, 102, 241, 0.4);
+    }
+    
+    .btn-secondary {
+        background: #f3f4f6;
+        color: #374151;
+        padding: 1rem 2rem;
+        border-radius: 12px;
+        border: none;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .btn-secondary:hover {
+        background: #e5e7eb;
+        transform: translateY(-1px);
+    }
+    
+    .error-message {
+        color: #ef4444;
+        font-size: 0.875rem;
+        margin-top: 0.5rem;
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+    }
+    
+    .fade-in {
+        animation: fadeIn 0.6s ease-out;
+    }
+    
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    
+    .password-section {
+        background: rgba(249, 250, 251, 0.8);
+        border-radius: 16px;
+        padding: 1.5rem;
+        border: 2px dashed #d1d5db;
+        margin-top: 1rem;
+    }
+    
+    .password-toggle {
+        background: linear-gradient(135deg, #f59e0b, #d97706);
+        color: white;
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        border: none;
+        font-size: 0.875rem;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+    
+    .password-toggle:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 15px rgba(245, 158, 11, 0.4);
+    }
+</style>
 @endpush
 
 @section('content')
-    <div class="animate-fade-in max-w-3xl mx-auto space-y-8">
-
-        <form id="profileUpdateForm" action="{{ route('anggota.profil.update') }}" method="POST" enctype="multipart/form-data">
-            @csrf
-            @method('PUT')
-            <div class="bg-white/90 backdrop-blur-md rounded-2xl shadow-xl border border-gray-200/80">
-                <div class="p-6 border-b border-gray-200/80">
-                    <h3 class="text-xl font-bold text-gray-800 flex items-center"><i
-                            class="fas fa-user-edit mr-3 text-blue-500"></i>Edit Informasi Profil</h3>
-                </div>
-                <div class="p-6 space-y-6">
+<div class="max-w-4xl mx-auto fade-in">
+    <div class="form-container">
+        <div class="form-header">
+            <div class="flex items-center justify-between relative z-10">
+                <div class="flex items-center gap-6">
+                    <div class="current-avatar">
+                        @if($user->profile_photo_url && !str_contains($user->profile_photo_url, 'placeholder_avatar.png'))
+                            <img src="{{ $user->profile_photo_url }}" alt="{{ $user->name }}">
+                        @else
+                            {{ strtoupper(substr($user->name, 0, 1)) }}
+                        @endif
+                    </div>
                     <div>
-                        <label for="name" class="block text-sm font-semibold text-gray-700 mb-2">Nama Lengkap <span
-                                class="text-red-500">*</span></label>
-                        <input type="text" name="name" id="name" value="{{ old('name', Auth::user()->name) }}"
-                            required class="form-input-style @error('name') border-red-500 @enderror">
+                        <h2 class="text-2xl font-bold mb-2">Edit Pengguna</h2>
+                        <p class="text-indigo-100">Perbarui informasi untuk {{ $user->name }}</p>
+                    </div>
+                </div>
+                <div class="w-16 h-16 bg-white bg-opacity-20 rounded-full flex items-center justify-center">
+                    <i class="fas fa-user-edit text-2xl"></i>
+                </div>
+            </div>
+        </div>
+        
+        <div class="p-8">
+            <form action="{{ route('admin.manajemen-pengguna.update', $user->id) }}" method="POST" id="editUserForm" class="space-y-6">
+                @csrf
+                @method('PUT')
+                
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- Nama Lengkap -->
+                    <div class="form-group">
+                        <label for="name" class="form-label required">Nama Lengkap</label>
+                        <div class="relative">
+                            <i class="fas fa-user input-icon"></i>
+                            <input type="text" 
+                                   id="name" 
+                                   name="name" 
+                                   value="{{ old('name', $user->name) }}"
+                                   class="form-input with-icon @error('name') border-red-500 @enderror" 
+                                   placeholder="Masukkan nama lengkap"
+                                   required>
+                        </div>
                         @error('name')
-                            <p class="text-red-600 text-xs mt-1.5">{{ $message }}</p>
+                            <div class="error-message">
+                                <i class="fas fa-exclamation-circle"></i>
+                                {{ $message }}
+                            </div>
                         @enderror
                     </div>
-
-                    <div>
-                        <label class="block text-sm font-semibold text-gray-700 mb-2">Foto Profil</label>
-                        <div class="flex items-center space-x-6">
-                            <img id="currentProfileImage" 
-     src="{{ Auth::user()->profile_photo_url }}" {{-- Menggunakan accessor --}}
-     alt="Foto Profil Saat Ini" 
-     class="profile-photo-current">
-                            <div id="profileInitialDivOnEdit"
-                                class="profile-photo-current-edit bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-2xl font-bold"
-                                style="{{ Auth::user()->profile_photo_path && !str_contains(Auth::user()->profile_photo_url, 'placeholder_avatar.png') ? 'display:none;' : 'display:flex;' }}">
-                                {{ strtoupper(substr(Auth::user()->name, 0, 1)) }}
-                            </div>
-                            <div class="flex-1">
-                                <input type="file" id="profile_photo_original_input_for_js"
-                                    accept="image/png,image/jpeg,image/jpg,image/webp" class="visually-hidden">
-                                <label for="profile_photo_original_input_for_js"
-                                    class="inline-flex items-center px-4 py-2 border border-gray-300 rounded-lg shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 cursor-pointer">
-                                    <i class="fas fa-upload mr-2 text-gray-500"></i> Pilih Foto...
-                                </label>
-                                <span id="fileNameDisplay" class="text-xs text-gray-500 ml-3 block mt-1">Tidak ada file
-                                    dipilih.</span>
-                                @if (Auth::user()->profile_photo_path && !str_contains(Auth::user()->profile_photo_url, 'placeholder_avatar.png'))
-                                    <button type="button" id="deleteProfilePhotoButton"
-                                        class="mt-2 text-xs text-red-600 hover:text-red-800 hover:underline">
-                                        Hapus Foto Saat Ini
-                                    </button>
-                                @endif
-                            </div>
+                    
+                    <!-- Email -->
+                    <div class="form-group">
+                        <label for="email" class="form-label required">Alamat Email</label>
+                        <div class="relative">
+                            <i class="fas fa-envelope input-icon"></i>
+                            <input type="email" 
+                                   id="email" 
+                                   name="email" 
+                                   value="{{ old('email', $user->email) }}"
+                                   class="form-input with-icon @error('email') border-red-500 @enderror" 
+                                   placeholder="contoh@email.com"
+                                   required>
                         </div>
-                        <input type="hidden" name="cropped_profile_photo" id="cropped_profile_photo_data">
-                        @error('cropped_profile_photo')
-                            <p class="text-red-600 text-xs mt-1.5">{{ $message }}</p>
+                        @error('email')
+                            <div class="error-message">
+                                <i class="fas fa-exclamation-circle"></i>
+                                {{ $message }}
+                            </div>
+                        @enderror
+                    </div>
+                    
+                    <!-- Nomor Anggota -->
+                    <div class="form-group">
+                        <label for="nomor_anggota" class="form-label">Nomor Anggota</label>
+                        <div class="relative">
+                            <i class="fas fa-id-badge input-icon"></i>
+                            <input type="text" 
+                                   id="nomor_anggota" 
+                                   name="nomor_anggota" 
+                                   value="{{ old('nomor_anggota', $user->nomor_anggota) }}"
+                                   class="form-input with-icon @error('nomor_anggota') border-red-500 @enderror" 
+                                   placeholder="Contoh: KOP001">
+                        </div>
+                        @error('nomor_anggota')
+                            <div class="error-message">
+                                <i class="fas fa-exclamation-circle"></i>
+                                {{ $message }}
+                            </div>
+                        @enderror
+                    </div>
+                    
+                    <!-- Role -->
+                    <div class="form-group">
+                        <label for="role" class="form-label required">Peran (Role)</label>
+                        <div class="relative">
+                            <i class="fas fa-user-tag input-icon"></i>
+                            <select id="role" 
+                                    name="role" 
+                                    class="form-input with-icon @error('role') border-red-500 @enderror" 
+                                    required>
+                                @foreach($rolesForForm as $value => $label)
+                                    <option value="{{ $value }}" {{ old('role', $user->role) == $value ? 'selected' : '' }}>
+                                        {{ $label }}
+                                    </option>
+                                @endforeach
+                            </select>
+                        </div>
+                        @error('role')
+                            <div class="error-message">
+                                <i class="fas fa-exclamation-circle"></i>
+                                {{ $message }}
+                            </div>
                         @enderror
                     </div>
                 </div>
-                <div class="p-6 bg-gray-50/70 rounded-b-2xl border-t border-gray-200/80 flex justify-end">
-                    <x-forms.button type="submit" variant="primary" icon="save">Simpan Perubahan Profil</x-forms.button>
-                </div>
-            </div>
-        </form>
-        <form id="deleteActualProfilePhotoForm" action="{{ route('anggota.profil.photo.delete') }}" method="POST"
-            class="hidden">@csrf @method('DELETE')</form>
-
-        <div class="bg-white/90 backdrop-blur-md rounded-2xl shadow-xl border border-gray-200/80">
-            <div class="p-6 border-b border-gray-200/80">
-                <h3 class="text-xl font-bold text-gray-800 flex items-center"><i
-                        class="fas fa-key mr-3 text-blue-500"></i>Ubah Password</h3>
-            </div>
-            <div class="p-6">
-                <form action="{{ route('anggota.profil.updatePassword') }}" method="POST" class="space-y-6" data-validate>
-                    @csrf @method('PUT')
-                    <x-forms.input type="password" name="current_password" label="Password Saat Ini" :required="true" />
-                    <x-forms.input type="password" name="password" label="Password Baru" placeholder="Minimal 8 karakter"
-                        :required="true" />
-                    <x-forms.input type="password" name="password_confirmation" label="Konfirmasi Password Baru"
-                        :required="true" />
-                    <div class="flex justify-end pt-2">
-                        <x-forms.button type="submit" variant="primary" icon="key">Update Password</x-forms.button>
+                
+                <!-- Status -->
+                <div class="form-group">
+                    <label for="status" class="form-label required">Status Akun</label>
+                    <div class="relative">
+                        <i class="fas fa-toggle-on input-icon"></i>
+                        <select id="status" 
+                                name="status" 
+                                class="form-input with-icon @error('status') border-red-500 @enderror" 
+                                required>
+                            @foreach($statusesForForm as $value => $label)
+                                <option value="{{ $value }}" {{ old('status', $user->status) == $value ? 'selected' : '' }}>
+                                    {{ $label }}
+                                </option>
+                            @endforeach
+                        </select>
                     </div>
-                </form>
-            </div>
-        </div>
-
-        <div class="mt-8 flex justify-start">
-            <a href="{{ route('anggota.profil.show') }}">
-                <x-forms.button type="button" variant="secondary" icon="arrow-left">Kembali ke Profil Saya</x-forms.button>
-            </a>
-        </div>
-
-        <div id="cropImageModal"
-            class="fixed inset-0 modal-overlay hidden items-center justify-center z-[100] p-4 animate-fade-in">
-            <div class="modal-content animate-scale-in">
-                <div class="p-6 border-b border-gray-200">
-                    <div class="flex justify-between items-center">
-                        <h3 class="text-2xl font-bold text-gray-800 flex items-center"><i
-                                class="fas fa-crop-alt mr-3 text-blue-500"></i> Sesuaikan Foto Profil</h3><button
-                            type="button" id="closeCropModalBtn"
-                            class="text-gray-400 hover:text-gray-600 transition-colors text-2xl"><i
-                                class="fas fa-times"></i></button>
-                    </div>
-                </div>
-                <div class="p-6">
-                    <div class="img-container-cropper mb-6"><img id="imageToCropInModal" src="#"
-                            alt="Pratinjau Crop"></div>
-                    <div class="flex flex-col lg:flex-row items-center justify-between gap-6">
-                        <div class="text-center order-2 lg:order-1">
-                            <p class="text-sm font-semibold text-gray-700 mb-3">Pratinjau Hasil:</p>
-                            <div class="preview-circle-container"></div>
+                    @error('status')
+                        <div class="error-message">
+                            <i class="fas fa-exclamation-circle"></i>
+                            {{ $message }}
                         </div>
-                        <div class="flex space-x-3 order-1 lg:order-2"><button type="button" id="cancelCropModalBtn"
-                                class="bg-gray-500 hover:bg-gray-600 text-white font-semibold py-2 px-4 rounded-lg transition-all duration-300"><i
-                                    class="fas fa-times mr-2"></i>Batal</button><button type="button" id="applyCropBtn"
-                                class="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition-all duration-300"><i
-                                    class="fas fa-check mr-2"></i>Terapkan & Gunakan</button></div>
+                    @enderror
+                </div>
+                
+                <!-- Password Section -->
+                <div class="password-section">
+                    <div class="flex items-center justify-between mb-4">
+                        <h4 class="text-lg font-semibold text-gray-800 flex items-center">
+                            <i class="fas fa-key mr-2 text-orange-500"></i>
+                            Ubah Password
+                        </h4>
+                        <button type="button" id="togglePasswordSection" class="password-toggle">
+                            <i class="fas fa-eye mr-1"></i>
+                            Tampilkan Form Password
+                        </button>
+                    </div>
+                    
+                    <div id="passwordFields" class="hidden space-y-4">
+                        <p class="text-sm text-gray-600 mb-4">
+                            <i class="fas fa-info-circle mr-1"></i>
+                            Kosongkan jika tidak ingin mengubah password
+                        </p>
+                        
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            <div class="form-group">
+                                <label for="password" class="form-label">Password Baru</label>
+                                <div class="relative">
+                                    <i class="fas fa-lock input-icon"></i>
+                                    <input type="password" 
+                                           id="password" 
+                                           name="password" 
+                                           class="form-input with-icon @error('password') border-red-500 @enderror" 
+                                           placeholder="Minimal 8 karakter">
+                                </div>
+                                @error('password')
+                                    <div class="error-message">
+                                        <i class="fas fa-exclamation-circle"></i>
+                                        {{ $message }}
+                                    </div>
+                                @enderror
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="password_confirmation" class="form-label">Konfirmasi Password</label>
+                                <div class="relative">
+                                    <i class="fas fa-lock input-icon"></i>
+                                    <input type="password" 
+                                           id="password_confirmation" 
+                                           name="password_confirmation" 
+                                           class="form-input with-icon @error('password_confirmation') border-red-500 @enderror" 
+                                           placeholder="Ulangi password baru">
+                                </div>
+                                @error('password_confirmation')
+                                    <div class="error-message">
+                                        <i class="fas fa-exclamation-circle"></i>
+                                        {{ $message }}
+                                    </div>
+                                @enderror
+                            </div>
+                        </div>
                     </div>
                 </div>
-            </div>
+                
+                <!-- Submit Buttons -->
+                <div class="flex flex-col sm:flex-row justify-end space-y-3 sm:space-y-0 sm:space-x-4 pt-6 border-t border-gray-200">
+                    <a href="{{ route('admin.manajemen-pengguna.show', $user->id) }}">
+                        <button type="button" class="btn-secondary w-full sm:w-auto">
+                            <i class="fas fa-arrow-left"></i>
+                            Batal
+                        </button>
+                    </a>
+                    <button type="submit" class="btn-primary w-full sm:w-auto" id="submitBtn">
+                        <i class="fas fa-save"></i>
+                        Simpan Perubahan
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
+</div>
 @endsection
 
 @push('scripts')
-    {{-- Kode JavaScript untuk Cropper.js SAMA seperti yang sudah Anda berikan dan saya sempurnakan sedikit di chat sebelumnya --}}
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
-    <script>
-        // Kode JS untuk cropper, open/close modal, apply crop, delete photo SAMA SEPERTI YANG SUDAH KITA BUAT SEBELUMNYA
-        // Pastikan KoperasiApp.openModal, KoperasiApp.closeModal, dan KoperasiApp.showNotification
-        // didefinisikan di app.js atau di-fallback di sini jika belum.
-        document.addEventListener('DOMContentLoaded', function() {
-            const originalPhotoInput = document.getElementById('profile_photo_original_input_for_js');
-            const currentProfileImageEl = document.getElementById(
-            'currentProfileImageOnEdit'); // Pastikan ID ini ada di img atau div inisial
-            const profileInitialDivOnEdit = document.getElementById('profileInitialDivOnEdit');
-            const cropModalEl = document.getElementById('cropImageModal');
-            const imageToCropEl = document.getElementById('imageToCropInModal');
-            const closeCropModalBtn = document.getElementById('closeCropModalBtn');
-            const cancelCropModalBtn = document.getElementById('cancelCropModalBtn');
-            const applyCropBtn = document.getElementById('applyCropBtn');
-            // const profileUpdateForm = document.getElementById('profileUpdateForm'); // Tidak perlu submit dari JS ini
-            const croppedImageDataInput = document.getElementById('cropped_profile_photo_data');
-            const fileNameDisplay = document.getElementById('fileNameDisplay');
-            const deleteProfilePhotoButton = document.getElementById('deleteProfilePhotoButton');
-
-            let cropperInstance;
-            let originalFileDetails = null;
-
-            // Fallback KoperasiApp jika belum ada
-            window.KoperasiApp = window.KoperasiApp || {};
-            KoperasiApp.openModal = KoperasiApp.openModal || function(modalId) {
-                const modal = document.getElementById(modalId);
-                if (modal) {
-                    modal.classList.remove('hidden');
-                    modal.classList.add('flex');
-                    document.body.style.overflow = 'hidden';
-                }
-            };
-            KoperasiApp.closeModal = KoperasiApp.closeModal || function(modalId) {
-                const modal = document.getElementById(modalId);
-                if (modal) {
-                    modal.classList.add('hidden');
-                    modal.classList.remove('flex');
-                    document.body.style.overflow = 'auto';
-                }
-            };
-            KoperasiApp.showNotification = KoperasiApp.showNotification || function(message, type = 'info') {
-                console.log(`Notification (${type}): ${message}`); // Fallback sederhana
-                alert(`Notification (${type}): ${message}`);
-            };
-
-
-            if (originalPhotoInput) {
-                originalPhotoInput.addEventListener('change', function(event) {
-                    const files = event.target.files;
-                    if (files && files.length > 0) {
-                        const file = files[0];
-                        if (file.size > 2 * 1024 * 1024) {
-                            KoperasiApp.showNotification('Ukuran file terlalu besar (Maks 2MB).', 'error');
-                            this.value = '';
-                            return;
-                        }
-                        const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-                        if (!allowedTypes.includes(file.type)) {
-                            KoperasiApp.showNotification('Tipe file tidak didukung (JPG, PNG, WEBP).',
-                                'error');
-                            this.value = '';
-                            return;
-                        }
-
-                        originalFileDetails = {
-                            name: file.name,
-                            type: file.type
-                        };
-                        if (fileNameDisplay) fileNameDisplay.textContent =
-                            `File: ${originalFileDetails.name}`;
-
-                        const reader = new FileReader();
-                        reader.onload = function(e) {
-                            if (imageToCropEl) imageToCropEl.src = e.target.result;
-                            if (cropModalEl) KoperasiApp.openModal('cropImageModal');
-
-                            if (cropperInstance) cropperInstance.destroy();
-                            if (imageToCropEl) {
-                                cropperInstance = new Cropper(imageToCropEl, {
-                                    aspectRatio: 1,
-                                    viewMode: 1,
-                                    dragMode: 'move',
-                                    background: false,
-                                    preview: '.preview-circle-container',
-                                    responsive: true,
-                                    checkOrientation: false,
-                                    modal: true,
-                                    guides: true,
-                                    center: true,
-                                    highlight: false,
-                                    cropBoxMovable: true,
-                                    cropBoxResizable: true,
-                                    toggleDragModeOnDblclick: false,
-                                    minCropBoxWidth: 100,
-                                    minCropBoxHeight: 100,
-                                });
-                            }
-                        };
-                        reader.readAsDataURL(file);
-                    }
-                });
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const togglePasswordBtn = document.getElementById('togglePasswordSection');
+    const passwordFields = document.getElementById('passwordFields');
+    const submitBtn = document.getElementById('submitBtn');
+    
+    // Toggle password section
+    togglePasswordBtn.addEventListener('click', function() {
+        const isHidden = passwordFields.classList.contains('hidden');
+        
+        if (isHidden) {
+            passwordFields.classList.remove('hidden');
+            this.innerHTML = '<i class="fas fa-eye-slash mr-1"></i> Sembunyikan Form Password';
+        } else {
+            passwordFields.classList.add('hidden');
+            this.innerHTML = '<i class="fas fa-eye mr-1"></i> Tampilkan Form Password';
+            // Clear password fields when hiding
+            document.getElementById('password').value = '';
+            document.getElementById('password_confirmation').value = '';
+        }
+    });
+    
+    // Form submission with loading state
+    document.getElementById('editUserForm').addEventListener('submit', function() {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = `
+            <i class="fas fa-spinner fa-spin"></i>
+            Menyimpan...
+        `;
+    });
+    
+    // Password confirmation validation
+    const passwordInput = document.getElementById('password');
+    const passwordConfirmInput = document.getElementById('password_confirmation');
+    
+    function validatePasswordMatch() {
+        if (passwordInput.value && passwordConfirmInput.value) {
+            if (passwordInput.value !== passwordConfirmInput.value) {
+                passwordConfirmInput.setCustomValidity('Password tidak cocok');
+            } else {
+                passwordConfirmInput.setCustomValidity('');
             }
-
-            function hideCropperModal() {
-                if (cropModalEl) KoperasiApp.closeModal('cropImageModal');
-                if (cropperInstance) {
-                    cropperInstance.destroy();
-                    cropperInstance = null;
-                }
-                if (originalPhotoInput) originalPhotoInput.value = '';
-                if (fileNameDisplay) fileNameDisplay.textContent = 'Tidak ada file dipilih.';
-                // Jangan kosongkan croppedImageDataInput di sini, karena user mungkin batal tapi sudah apply crop
-            }
-
-            if (closeCropModalBtn) closeCropModalBtn.addEventListener('click', hideCropperModal);
-            if (cancelCropModalBtn) cancelCropModalBtn.addEventListener('click', hideCropperModal);
-
-            if (applyCropBtn) {
-                applyCropBtn.addEventListener('click', function() {
-                    if (!cropperInstance || !originalFileDetails) {
-                        KoperasiApp.showNotification('Pilih gambar dan crop terlebih dahulu.', 'warning');
-                        return;
-                    }
-                    const canvas = cropperInstance.getCroppedCanvas({
-                        width: 300,
-                        height: 300,
-                        imageSmoothingQuality: 'high'
-                    });
-                    const croppedImageDataURL = canvas.toDataURL(originalFileDetails.type || 'image/jpeg',
-                        0.9);
-
-                    if (croppedImageDataInput) croppedImageDataInput.value = croppedImageDataURL;
-
-                    if (currentProfileImageEl) {
-                        currentProfileImageEl.src = croppedImageDataURL;
-                        if (profileInitialDivOnEdit) profileInitialDivOnEdit.style.display =
-                        'none'; // Sembunyikan inisial
-                        currentProfileImageEl.style.display = 'block'; // Tampilkan gambar
-                    }
-                    hideCropperModal();
-                    KoperasiApp.showNotification(
-                        'Foto profil telah di-crop. Klik "Simpan Perubahan Profil" untuk mengupload.',
-                        'info');
-                });
-            }
-
-            if (deleteProfilePhotoButton) {
-                deleteProfilePhotoButton.addEventListener('click', function(event) {
-                    event.preventDefault();
-                    if (confirm('Apakah Anda yakin ingin menghapus foto profil Anda?')) {
-                        document.getElementById('deleteActualProfilePhotoForm').submit();
-                    }
-                });
-            }
-
-            if (cropModalEl) {
-                cropModalEl.addEventListener('click', function(event) {
-                    if (event.target === this) {
-                        hideCropperModal();
-                    }
-                });
-            }
-        });
-    </script>
+        }
+    }
+    
+    passwordInput.addEventListener('input', validatePasswordMatch);
+    passwordConfirmInput.addEventListener('input', validatePasswordMatch);
+});
+</script>
 @endpush

@@ -1,5 +1,5 @@
 @forelse($unitUsahas as $index => $unit)
-    <tr class="hover:bg-gradient-to-r hover:from-emerald-50 hover:to-transparent transition-all duration-300 group transform hover:scale-[1.01] border-b border-gray-50" 
+    <tr class="table-row hover:bg-gradient-to-r hover:from-emerald-50 hover:to-transparent transition-all duration-300 group transform hover:scale-[1.01] border-b border-gray-50" 
         style="animation: slideInUp 0.5s ease-out {{ $index * 0.1 }}s both;">
         <td class="py-6 px-6">
             <div class="flex items-center space-x-4">
@@ -63,7 +63,7 @@
                         <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/>
                     </svg>
                 </a>
-                <button onclick="confirmDeleteUnit('{{ route('pengurus.unit-usaha.destroy', $unit->id) }}', '{{ $unit->nama_unit_usaha }}')" 
+                <button onclick="confirmDelete('{{ route('pengurus.unit-usaha.destroy', $unit->id) }}', '{{ ($unit->nama_unit_usaha) }}')" 
                         class="action-btn bg-red-500 hover:bg-red-600 text-white shadow-lg hover:shadow-xl" 
                         title="Hapus Unit Usaha">
                     <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
@@ -117,10 +117,36 @@
     overflow: hidden;
 }
 
-.line-clamp-3 {
-    display: -webkit-box;
-    -webkit-line-clamp: 3;
-    -webkit-box-orient: vertical;
+.action-btn {
+    width: 48px;
+    height: 48px;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
     overflow: hidden;
+    border: none;
+    cursor: pointer;
+    z-index: 10;
+}
+
+.action-btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle, rgba(255,255,255,0.3) 0%, transparent 70%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.action-btn:hover::before {
+    opacity: 1;
+}
+
+.action-btn:hover {
+    transform: translateY(-3px) scale(1.1);
+    box-shadow: 0 12px 25px -5px rgba(0, 0, 0, 0.25);
 }
 </style>

@@ -11,6 +11,7 @@ use App\Http\Controllers\HomeController;
 use App\Http\Controllers\Admin\DashboardController as AdminDashboardController;
 use App\Http\Controllers\Admin\ManajemenPenggunaController;
 use App\Http\Controllers\Admin\SettingController;
+use App\Http\Controllers\Admin\ProfileController;
 
 // Pengurus Controllers
 use App\Http\Controllers\Pengurus\DashboardController as PengurusDashboardController;
@@ -31,8 +32,7 @@ use App\Http\Controllers\Anggota\DashboardController as AnggotaDashboardControll
 use App\Http\Controllers\Anggota\ProfilAnggotaController;
 use App\Http\Controllers\Anggota\SimpananAnggotaController;
 use App\Http\Controllers\Anggota\PembelianAnggotaController;
-use App\Http\Controllers\Anggota\ProsesPembelianController
-;
+use App\Http\Controllers\Anggota\ProsesPembelianController;
 
 /*
 |--------------------------------------------------------------------------
@@ -72,16 +72,26 @@ Route::middleware('auth')->group(function () {
             'manajemen-pengguna' => 'user' // Map parameter {manajemen_pengguna} ke $user
         ]);
         Route::post('/pengurus/stok/{barang}/quick-update', [PencatatanStokController::class, 'quickStockUpdate'])
-        ->name('pengurus.stok.quickUpdate');
-        
+            ->name('pengurus.stok.quickUpdate');
+
+        Route::get('/profile', [ProfileController::class, 'index'])->name('profile.index');
+    Route::put('/profile', [ProfileController::class, 'update'])->name('profile.update');
+    Route::put('/profile/password', [ProfileController::class, 'updatePassword'])->name('profile.password');
+
         Route::prefix('settings')->name('settings.')->controller(SettingController::class)->group(function () {
-        Route::get('/', 'index')->name('index');
-        Route::put('general', 'updateGeneral')->name('general.update');
-        Route::put('simpanan', 'updateSimpananDefaults')->name('simpanan.update');
-        Route::put('appearance', 'updateAppearance')->name('appearance.update');
-        Route::put('my-profile', 'updateMyProfile')->name('myprofile.update'); // Untuk update profil admin
-        Route::put('my-password', 'updateMyPassword')->name('mypassword.update'); // Untuk update password admin
-    });
+            Route::get('/', 'index')->name('index');
+            Route::put('general', 'updateGeneral')->name('general.update');
+            Route::put('simpanan', 'updateSimpananDefaults')->name('simpanan.update');
+            Route::put('appearance', 'updateAppearance')->name('appearance.update');
+            Route::put('my-profile', 'updateMyProfile')->name('myprofile.update'); // Untuk update profil admin
+            Route::put('my-password', 'updateMyPassword')->name('mypassword.update'); // Untuk update password admin
+            // Tambahkan routes ini di web.php
+            Route::put('/admin/settings/general', [SettingController::class, 'updateGeneral'])->name('admin.settings.general.update');
+            Route::put('/admin/settings/simpanan', [SettingController::class, 'updateSimpananDefaults'])->name('admin.settings.simpanan.update');
+            Route::put('/admin/settings/appearance', [SettingController::class, 'updateAppearance'])->name('admin.settings.appearance.update');
+            Route::put('/admin/settings/myprofile', [SettingController::class, 'updateMyProfile'])->name('admin.settings.myprofile.update');
+            Route::put('/admin/settings/mypassword', [SettingController::class, 'updateMyPassword'])->name('admin.settings.mypassword.update');
+        });
         // Route untuk backup data (contoh, perlu controller)
         // Route::get('backup', [BackupController::class, 'index'])->name('backup.index');
     });
@@ -93,26 +103,28 @@ Route::middleware('auth')->group(function () {
     */
     Route::prefix('pengurus')->name('pengurus.')->middleware('role:admin,pengurus')->group(function () {
         Route::get('dashboard', [PengurusDashboardController::class, 'index'])->name('dashboard');
-        
+
         Route::resource('unit-usaha', ManajemenUnitUsahaController::class)->parameters([
             'unit-usaha' => 'unitUsaha' // Map parameter {unit_usaha} ke $unitUsaha
         ]);
+
+        Route::resource('unit-usaha', ManajemenUnitUsahaController::class)->except(['show']);
         Route::resource('barang', ManajemenBarangController::class);  // Parameter default {barang} sudah pas
 
-        Route::prefix('stok')->name('stok.')->controller(PencatatanStokController::class)->group(function() {
-        Route::get('/', 'index')->name('index'); // HALAMAN UTAMA MODUL STOK
-        Route::get('barang-masuk/{barang}/form', 'showFormBarangMasuk')->name('formBarangMasuk');
-        Route::post('barang-masuk/{barang}', 'storeBarangMasuk')->name('storeBarangMasuk');
-        Route::get('barang-keluar/{barang}/form', 'showFormBarangKeluar')->name('formBarangKeluar');
-        Route::post('barang-keluar/{barang}', 'storeBarangKeluar')->name('storeBarangKeluar');
-        Route::get('penyesuaian/{barang}/form', 'showFormPenyesuaianStok')->name('formPenyesuaianStok');
-        Route::post('penyesuaian/{barang}', 'storePenyesuaianStok')->name('storePenyesuaianStok');
-        // Route untuk histori per barang sudah implisit di ManajemenBarangController@show
-        // atau jika ingin dedicated, bisa ditambahkan:
-        // Route::get('histori/{barang}', 'historiStokBarang')->name('historiPerBarang');
-    });
+        Route::prefix('stok')->name('stok.')->controller(PencatatanStokController::class)->group(function () {
+            Route::get('/', 'index')->name('index'); // HALAMAN UTAMA MODUL STOK
+            Route::get('barang-masuk/{barang}/form', 'showFormBarangMasuk')->name('formBarangMasuk');
+            Route::post('barang-masuk/{barang}', 'storeBarangMasuk')->name('storeBarangMasuk');
+            Route::get('barang-keluar/{barang}/form', 'showFormBarangKeluar')->name('formBarangKeluar');
+            Route::post('barang-keluar/{barang}', 'storeBarangKeluar')->name('storeBarangKeluar');
+            Route::get('penyesuaian/{barang}/form', 'showFormPenyesuaianStok')->name('formPenyesuaianStok');
+            Route::post('penyesuaian/{barang}', 'storePenyesuaianStok')->name('storePenyesuaianStok');
+            // Route untuk histori per barang sudah implisit di ManajemenBarangController@show
+            // atau jika ingin dedicated, bisa ditambahkan:
+            // Route::get('histori/{barang}', 'historiStokBarang')->name('historiPerBarang');
+        });
 
-        Route::prefix('simpanan')->name('simpanan.')->controller(ManajemenSimpananController::class)->group(function() {
+        Route::prefix('simpanan')->name('simpanan.')->controller(ManajemenSimpananController::class)->group(function () {
             Route::get('pokok', 'indexPokok')->name('pokok.index');
             Route::post('pokok', 'storePokok')->name('pokok.store');
             Route::get('wajib', 'indexWajib')->name('wajib.index');
@@ -123,18 +135,18 @@ Route::middleware('auth')->group(function () {
             Route::get('riwayat/{anggota}', 'riwayatSimpananAnggota')->name('riwayatAnggota');
         });
 
-        Route::prefix('transaksi-pembelian')->name('transaksi-pembelian.')->controller(TransaksiPembelianController::class)->group(function() {
+        Route::prefix('transaksi-pembelian')->name('transaksi-pembelian.')->controller(TransaksiPembelianController::class)->group(function () {
             Route::get('/', 'index')->name('index');
             Route::get('create', 'create')->name('create');
             Route::post('/', 'store')->name('store');
             Route::get('{pembelian}', 'show')->name('show');
         });
 
-         Route::prefix('pembayaran-cicilan')->name('pembayaran-cicilan.')->controller(PembayaranCicilanController::class)->group(function() {
-        Route::get('/', 'index')->name('index'); // <-- ROUTE BARU UNTUK DAFTAR PEMBELIAN YANG DICICIL
-        Route::get('{pembelian}/create', 'showFormBayarCicilan')->name('create');
-        Route::post('{pembelian}', 'storePembayaranCicilan')->name('store');
-    });
+        Route::prefix('pembayaran-cicilan')->name('pembayaran-cicilan.')->controller(PembayaranCicilanController::class)->group(function () {
+            Route::get('/', 'index')->name('index'); // <-- ROUTE BARU UNTUK DAFTAR PEMBELIAN YANG DICICIL
+            Route::get('{pembelian}/create', 'showFormBayarCicilan')->name('create');
+            Route::post('{pembelian}', 'storePembayaranCicilan')->name('store');
+        });
 
         Route::prefix('laporan')->name('laporan.')->group(function () {
             Route::prefix('penjualan')->name('penjualan.')->controller(LaporanPenjualanController::class)->group(function () {
@@ -163,27 +175,27 @@ Route::middleware('auth')->group(function () {
     | Anggota Routes
     |--------------------------------------------------------------------------
     */
-    Route::prefix('anggota')->name('anggota.')->middleware('role:anggota')->group(function() {
+    Route::prefix('anggota')->name('anggota.')->middleware('role:anggota')->group(function () {
         Route::get('dashboard', [AnggotaDashboardController::class, 'index'])->name('dashboard');
-        
-         Route::prefix('profil')->name('profil.')->controller(ProfilAnggotaController::class)->group(function() {
-        Route::get('/', 'showProfilSaya')->name('show');
-        Route::get('edit', 'editProfilSaya')->name('edit');
-        Route::put('update', 'updateProfilSaya')->name('update'); // Menggabungkan update nama, email, dan foto
-        Route::put('update-password', 'updatePasswordSaya')->name('updatePassword');
-        Route::delete('delete-photo', 'deleteProfilePhoto')->name('photo.delete');
-    });
+
+        Route::prefix('profil')->name('profil.')->controller(ProfilAnggotaController::class)->group(function () {
+            Route::get('/', 'showProfilSaya')->name('show');
+            Route::get('edit', 'editProfilSaya')->name('edit');
+            Route::put('update', 'updateProfilSaya')->name('update'); // Menggabungkan update nama, email, dan foto
+            Route::put('update-password', 'updatePasswordSaya')->name('updatePassword');
+            Route::delete('delete-photo', 'deleteProfilePhoto')->name('photo.delete');
+        });
 
         Route::get('simpanan', [SimpananAnggotaController::class, 'showSimpananSaya'])->name('simpanan.show');
 
-        Route::prefix('pembelian')->name('pembelian.')->group(function() { // Hapus ->controller() jika method ada di controller berbeda
-        Route::get('katalog', [PembelianAnggotaController::class, 'showKatalogBarang'])->name('katalog');
-        Route::get('riwayat', [PembelianAnggotaController::class, 'showRiwayatPembelianSaya'])->name('riwayat');
-        Route::get('{pembelian}/detail', [PembelianAnggotaController::class, 'showDetailPembelianSaya'])->name('detail');
-        
-        // Route baru untuk detail barang dan proses pembelian oleh anggota
-        Route::get('barang/{barang}/lihat', [ProsesPembelianController::class, 'showDetailBarang'])->name('barang.detail');
-        Route::post('barang/{barang}/beli-saldo', [ProsesPembelianController::class, 'prosesPembelianDenganSaldo'])->name('barang.beliSaldo');
-    });
+        Route::prefix('pembelian')->name('pembelian.')->group(function () { // Hapus ->controller() jika method ada di controller berbeda
+            Route::get('katalog', [PembelianAnggotaController::class, 'showKatalogBarang'])->name('katalog');
+            Route::get('riwayat', [PembelianAnggotaController::class, 'showRiwayatPembelianSaya'])->name('riwayat');
+            Route::get('{pembelian}/detail', [PembelianAnggotaController::class, 'showDetailPembelianSaya'])->name('detail');
+
+            // Route baru untuk detail barang dan proses pembelian oleh anggota
+            Route::get('barang/{barang}/lihat', [ProsesPembelianController::class, 'showDetailBarang'])->name('barang.detail');
+            Route::post('barang/{barang}/beli-saldo', [ProsesPembelianController::class, 'prosesPembelianDenganSaldo'])->name('barang.beliSaldo');
+        });
     });
 });

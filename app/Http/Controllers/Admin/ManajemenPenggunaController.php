@@ -6,11 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
-use Illuminate\Validation\Rules\Password as PasswordRule; // Alias untuk Rule Password
-use Illuminate\Support\Facades\Hash; // Jika Anda perlu Hash::make() secara manual
-use Illuminate\Support\Facades\Log; // Untuk logging
-use Illuminate\Support\Facades\Auth; 
-
+use Illuminate\Validation\Rules\Password as PasswordRule;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Auth;
 
 class ManajemenPenggunaController extends Controller
 {
@@ -21,6 +20,10 @@ class ManajemenPenggunaController extends Controller
 
     public function index(Request $request)
     {
+        $search = $request->input('search');
+        $perPage = $request->input('per_page', 10);
+        $viewMode = $request->input('view_mode', 'grid'); // Tambahkan view mode
+        
         $query = User::query();
 
         if ($request->filled('search')) {
@@ -40,18 +43,59 @@ class ManajemenPenggunaController extends Controller
             $query->where('status', $request->status_filter);
         }
 
-        $users = $query->orderBy('name')->paginate(10)->withQueryString();
+        // Sorting
+        $sortBy = $request->input('sort_by', 'name');
+        $sortOrder = $request->input('sort_order', 'asc');
+        
+        $validSortColumns = ['name', 'email', 'created_at', 'role', 'status'];
+        if (in_array($sortBy, $validSortColumns)) {
+            $query->orderBy($sortBy, $sortOrder);
+        } else {
+            $query->orderBy('name', 'asc');
+        }
+
+        $users = $query->paginate($perPage)->appends($request->except('page'));
+
         $roles = ['admin', 'pengurus', 'anggota'];
         $statuses = ['active', 'inactive'];
 
+        // Statistik global
+        $allUsers = User::all();
+        $stats = [
+            'total' => $allUsers->count(),
+            'totalAdmin' => $allUsers->where('role', 'admin')->count(),
+            'totalActive' => $allUsers->where('status', 'active')->count(),
+            'userBaru' => User::where('created_at', '>=', now()->subDays(30))->count(),
+        ];
+
         if ($request->ajax()) {
+            $html = '';
+            $gridHtml = '';
+            
+            // Generate HTML berdasarkan view mode yang diminta
+            if ($viewMode === 'table') {
+                $html = view('admin.pengguna.partials._user_table_rows', compact('users'))->render();
+            } else {
+                $gridHtml = view('admin.pengguna.partials._user_grid_items', compact('users'))->render();
+            }
+            
+            // Fix: Gunakan toHtml() instead of render() untuk pagination
+            $paginationHtml = $users->appends($request->except('page'))->links('vendor.pagination.tailwind')->toHtml();
+            
             return response()->json([
-                'html' => view('admin.pengguna.partials._user_table_rows', compact('users'))->render(),
-                'pagination' => (string) $users->links('vendor.pagination.tailwind-ajax')
+                'success' => true,
+                'html' => $html,
+                'gridHtml' => $gridHtml,
+                'pagination' => $paginationHtml,
+                'stats' => $stats,
+                'total' => $users->total(),
+                'currentPage' => $users->currentPage(),
+                'lastPage' => $users->lastPage(),
+                'viewMode' => $viewMode
             ]);
         }
         
-        return view('admin.pengguna.index', compact('users', 'roles', 'statuses'));
+        return view('admin.pengguna.index', compact('users', 'roles', 'statuses', 'stats'));
     }
 
     /**
@@ -59,9 +103,8 @@ class ManajemenPenggunaController extends Controller
      */
     public function create()
     {
-        // Mengembalikan view Blade untuk form tambah pengguna
-        $rolesForForm = ['admin' => 'Admin', 'pengurus' => 'Pengurus', 'anggota' => 'Anggota']; // Untuk select options
-        $statusesForForm = ['active' => 'Aktif', 'inactive' => 'Nonaktif']; // Untuk select options
+        $rolesForForm = ['admin' => 'Admin', 'pengurus' => 'Pengurus', 'anggota' => 'Anggota'];
+        $statusesForForm = ['active' => 'Aktif', 'inactive' => 'Nonaktif'];
         return view('admin.pengguna.create', compact('rolesForForm', 'statusesForForm'));
     }
 
@@ -76,7 +119,7 @@ class ManajemenPenggunaController extends Controller
             'nomor_anggota' => ['nullable', 'string', 'max:50', Rule::unique('users', 'nomor_anggota')->whereNull('deleted_at')],
             'password' => ['required', 'confirmed', PasswordRule::min(8)->mixedCase()->numbers()->symbols()],
             'role' => ['required', 'string', Rule::in(['admin', 'pengurus', 'anggota'])],
-            'status' => ['required', 'string', Rule::in(['active', 'inactive'])], // Tambah validasi status
+            'status' => ['required', 'string', Rule::in(['active', 'inactive'])],
         ]);
 
         try {
@@ -84,10 +127,10 @@ class ManajemenPenggunaController extends Controller
                 'name' => $validatedData['name'],
                 'email' => $validatedData['email'],
                 'nomor_anggota' => $validatedData['nomor_anggota'],
-                'password' => $validatedData['password'], // Otomatis hash oleh model User
+                'password' => Hash::make($validatedData['password']), // Fix: Hash password
                 'role' => $validatedData['role'],
-                'status' => $validatedData['status'], // Simpan status
-                'email_verified_at' => now(), // Admin yang membuat, anggap verified
+                'status' => $validatedData['status'],
+                'email_verified_at' => now(),
             ]);
 
             return redirect()->route('admin.manajemen-pengguna.index')->with('success', 'Pengguna baru berhasil ditambahkan.');
@@ -100,7 +143,7 @@ class ManajemenPenggunaController extends Controller
     /**
      * Display the specified resource.
      */
-    public function show(User $user) // Route model binding
+    public function show(User $user)
     {
         return view('admin.pengguna.show', compact('user'));
     }
@@ -108,9 +151,8 @@ class ManajemenPenggunaController extends Controller
     /**
      * Show the form for editing the specified resource.
      */
-    public function edit(User $user) // Route model binding
+    public function edit(User $user)
     {
-        // Mengembalikan view Blade untuk form edit pengguna
         $rolesForForm = ['admin' => 'Admin', 'pengurus' => 'Pengurus', 'anggota' => 'Anggota'];
         $statusesForForm = ['active' => 'Aktif', 'inactive' => 'Nonaktif'];
         return view('admin.pengguna.edit', compact('user', 'rolesForForm', 'statusesForForm'));
@@ -119,14 +161,14 @@ class ManajemenPenggunaController extends Controller
     /**
      * Update the specified resource in storage.
      */
-    public function update(Request $request, User $user) // Route model binding
+    public function update(Request $request, User $user)
     {
         $validatedData = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)->whereNull('deleted_at')],
             'nomor_anggota' => ['nullable', 'string', 'max:50', Rule::unique('users', 'nomor_anggota')->ignore($user->id)->whereNull('deleted_at')],
             'role' => ['required', 'string', Rule::in(['admin', 'pengurus', 'anggota'])],
-            'status' => ['required', 'string', Rule::in(['active', 'inactive'])], // Tambah validasi status
+            'status' => ['required', 'string', Rule::in(['active', 'inactive'])],
             'password' => ['nullable', 'confirmed', PasswordRule::min(8)->mixedCase()->numbers()->symbols()],
         ]);
 
@@ -135,10 +177,10 @@ class ManajemenPenggunaController extends Controller
             $user->email = $validatedData['email'];
             $user->nomor_anggota = $validatedData['nomor_anggota'];
             $user->role = $validatedData['role'];
-            $user->status = $validatedData['status']; // Update status
+            $user->status = $validatedData['status'];
 
             if (!empty($validatedData['password'])) {
-                $user->password = $validatedData['password'];
+                $user->password = Hash::make($validatedData['password']); // Fix: Hash password
             }
             $user->save();
 
@@ -157,22 +199,20 @@ class ManajemenPenggunaController extends Controller
         if (Auth::id() === $user->id) {
              return redirect()->route('admin.manajemen-pengguna.index')->with('error', 'Anda tidak dapat menghapus akun Anda sendiri.');
         }
-        if ($user->isAdmin() && User::where('role', 'admin')->whereNull('deleted_at')->count() === 1) { // Cek admin aktif
+        
+        // Fix: Check if user is admin and prevent deleting last admin
+        if ($user->role === 'admin' && User::where('role', 'admin')->whereNull('deleted_at')->count() === 1) {
             return redirect()->route('admin.manajemen-pengguna.index')->with('error', 'Tidak dapat menghapus admin aktif terakhir.');
         }
 
         try {
-            // Jika model User menggunakan SoftDeletes, ini akan melakukan soft delete.
-            // Laravel secara otomatis akan menambahkan `deleted_at` dengan timestamp.
             $user->delete(); 
-            return redirect()->route('admin.manajemen-pengguna.index')->with('success', 'Pengguna berhasil dihapus (dimasukkan ke arsip).');
+            return redirect()->route('admin.manajemen-pengguna.index')->with('success', 'Pengguna berhasil dihapus.');
         } 
-        // QueryException biasanya tidak akan terjadi dengan soft delete kecuali ada masalah fundamental lain.
-        // Tapi tetap baik untuk ada sebagai fallback.
         catch (\Illuminate\Database\QueryException $e) { 
             Log::error("Gagal hapus pengguna (QueryException) #{$user->id}: " . $e->getMessage());
             if (str_contains($e->getMessage(), 'foreign key constraint fails')) {
-                 return redirect()->route('admin.manajemen-pengguna.index')->with('error', 'Tidak dapat menghapus pengguna karena masih memiliki data terkait aktif. Coba non-aktifkan atau arsipkan.');
+                 return redirect()->route('admin.manajemen-pengguna.index')->with('error', 'Tidak dapat menghapus pengguna karena masih memiliki data terkait aktif.');
             }
             return redirect()->route('admin.manajemen-pengguna.index')->with('error', 'Gagal menghapus pengguna. Terjadi kesalahan database.');
         } catch (\Exception $e) {
