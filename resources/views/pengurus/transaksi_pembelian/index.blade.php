@@ -427,11 +427,11 @@
                 </h3>
                 <p class="opacity-90">Temukan transaksi dengan mudah</p>
             </div>
-            <a href="{{ route('pengurus.transaksi-pembelian.create') }}" 
+            {{-- <a href="{{ route('pengurus.transaksi-pembelian.create') }}" 
                class="bg-white text-purple-600 px-6 py-3 rounded-full font-semibold hover:bg-gray-100 transition-all duration-300 shadow-lg hover:shadow-xl transform hover:scale-105">
                 <i class="fas fa-plus-circle mr-2"></i>
                 Buat Transaksi Baru
-            </a>
+            </a> --}}
         </div>
 
         <form method="GET" action="{{ route('pengurus.transaksi-pembelian.index') }}" id="filterTransaksiForm">

@@ -75,8 +75,8 @@ Route::middleware('auth')->group(function () {
             ->name('pengurus.stok.quickUpdate');
 
         Route::get('/profile', [ProfileController::class, 'index'])->name('profile.index');
-    Route::put('/profile', [ProfileController::class, 'update'])->name('profile.update');
-    Route::put('/profile/password', [ProfileController::class, 'updatePassword'])->name('profile.password');
+        Route::put('/profile', [ProfileController::class, 'update'])->name('profile.update');
+        Route::put('/profile/password', [ProfileController::class, 'updatePassword'])->name('profile.password');
 
         Route::prefix('settings')->name('settings.')->controller(SettingController::class)->group(function () {
             Route::get('/', 'index')->name('index');
@@ -135,12 +135,28 @@ Route::middleware('auth')->group(function () {
             Route::get('riwayat/{anggota}', 'riwayatSimpananAnggota')->name('riwayatAnggota');
         });
 
-        Route::prefix('transaksi-pembelian')->name('transaksi-pembelian.')->controller(TransaksiPembelianController::class)->group(function () {
-            Route::get('/', 'index')->name('index');
-            Route::get('create', 'create')->name('create');
-            Route::post('/', 'store')->name('store');
-            Route::get('{pembelian}', 'show')->name('show');
-        });
+        // Route::prefix('transaksi-pembelian')->name('transaksi-pembelian.')->controller(TransaksiPembelianController::class)->group(function () {
+        //     Route::get('/', 'index')->name('index');
+        //     Route::get('create', 'create')->name('create');
+        //     Route::post('/', 'store')->name('store');
+        //     Route::get('{pembelian}', 'show')->name('show');
+        // });
+
+        Route::resource('transaksi-pembelian', TransaksiPembelianController::class)->names([
+        'index' => 'transaksi-pembelian.index',
+        'create' => 'transaksi-pembelian.create',
+        'store' => 'transaksi-pembelian.store',
+        'show' => 'transaksi-pembelian.show',
+        'edit' => 'transaksi-pembelian.edit',
+        'update' => 'transaksi-pembelian.update',
+        'destroy' => 'transaksi-pembelian.destroy',
+    ]);
+
+    Route::prefix('api')->name('api.')->group(function () {
+        Route::post('saldo-sukarela', [TransaksiPembelianController::class, 'getSaldoSukarela'])->name('saldo-sukarela');
+        Route::post('validate-stock', [TransaksiPembelianController::class, 'validateStock'])->name('validate-stock');
+        Route::get('saldo-anggota/{userId}', [ManajemenSimpananController::class, 'getSaldoAnggota'])->name('saldo-anggota');
+    });
 
         Route::prefix('pembayaran-cicilan')->name('pembayaran-cicilan.')->controller(PembayaranCicilanController::class)->group(function () {
             Route::get('/', 'index')->name('index'); // <-- ROUTE BARU UNTUK DAFTAR PEMBELIAN YANG DICICIL

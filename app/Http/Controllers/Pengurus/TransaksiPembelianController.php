@@ -267,208 +267,141 @@ class TransaksiPembelianController extends Controller
      */
     public function store(Request $request)
     {
-        // Enhanced validation with better error messages
-        try {
-            $validatedData = $request->validate([
-                'user_id' => ['required', Rule::exists('users', 'id')->where('role', 'anggota')],
-                'tanggal_pembelian' => ['required', 'date', 'before_or_equal:today'],
-                'metode_pembayaran' => ['required', Rule::in(['tunai', 'saldo_sukarela', 'hutang'])],
-                'items' => ['required', 'json'],
-                'total_bayar_manual' => ['nullable', 'numeric', 'min:0'],
-                'uang_muka' => ['nullable', 'numeric', 'min:0'],
-                'catatan' => ['nullable', 'string', 'max:1000'],
-            ], [
-                'user_id.required' => 'Pilih anggota pembeli',
-                'user_id.exists' => 'Anggota yang dipilih tidak valid',
-                'tanggal_pembelian.required' => 'Tanggal transaksi harus diisi',
-                'tanggal_pembelian.before_or_equal' => 'Tanggal transaksi tidak boleh lebih dari hari ini',
-                'metode_pembayaran.required' => 'Pilih metode pembayaran',
-                'metode_pembayaran.in' => 'Metode pembayaran tidak valid',
-                'items.required' => 'Pilih minimal satu barang',
-                'items.json' => 'Format data barang tidak valid',
-                'total_bayar_manual.numeric' => 'Jumlah pembayaran harus berupa angka',
-                'total_bayar_manual.min' => 'Jumlah pembayaran tidak boleh negatif',
-                'uang_muka.numeric' => 'Uang muka harus berupa angka',
-                'uang_muka.min' => 'Uang muka tidak boleh negatif',
-                'catatan.max' => 'Catatan maksimal 1000 karakter',
-            ]);
-        } catch (\Illuminate\Validation\ValidationException $e) {
-            return redirect()->back()
-                           ->withInput()
-                           ->withErrors($e->errors())
-                           ->with('error', 'Data yang dimasukkan tidak valid. Silakan periksa kembali.');
-        }
-
-        // Parse items JSON
-        try {
-            $items = json_decode($validatedData['items'], true);
-            if (!is_array($items) || empty($items)) {
-                throw new \Exception('Data barang tidak valid atau kosong');
-            }
-        } catch (\Exception $e) {
-            return redirect()->back()->withInput()->with('error', 'Format data barang tidak valid: ' . $e->getMessage());
-        }
-
-        $kasirId = Auth::id();
-        $totalHargaKeseluruhan = 0;
-        $detailItemsData = [];
+        // 1. Validasi input dengan field yang benar
+        $validated = $request->validate([
+            'anggota_id' => 'required|exists:users,id',
+            'tanggal_pembelian' => 'required|date',
+            'metode_pembayaran' => 'required|in:tunai,saldo_sukarela,hutang',
+            'barangs' => 'required|array|min:1',
+            'barangs.*.id' => 'required|exists:barangs,id',
+            'barangs.*.jumlah' => 'required|integer|min:1',
+            'total_bayar_manual' => 'nullable|numeric|min:0',
+            'uang_muka' => 'nullable|numeric|min:0',
+            'catatan' => 'nullable|string|max:255',
+        ]);
 
         DB::beginTransaction();
         try {
-            // 1. Validasi stok dan hitung total harga dari DB
-            foreach ($items as $item) {
-                // Validate item structure
-                if (!isset($item['barang_id']) || !isset($item['jumlah']) || !isset($item['harga_satuan'])) {
-                    throw new \Exception('Struktur data barang tidak lengkap');
+            $totalHarga = 0;
+            $detailsToInsert = [];
+        
+            // Ambil semua barang yang diminta dalam satu query untuk efisiensi
+            $requestedBarangs = collect($validated['barangs']);
+            $barangIds = $requestedBarangs->pluck('id');
+            $barangsFromDB = Barang::whereIn('id', $barangIds)->lockForUpdate()->get()->keyBy('id');
+
+            // 2. Kalkulasi total harga dan periksa stok
+            foreach ($requestedBarangs as $barang) {
+                $item = $barangsFromDB->get($barang['id']);
+            
+                if (!$item) {
+                    throw new \Exception("Barang dengan ID {$barang['id']} tidak ditemukan.");
+                }
+            
+                if ($item->stok < $barang['jumlah']) {
+                    throw new \Exception("Stok untuk barang '{$item->nama_barang}' tidak mencukupi. Sisa stok: {$item->stok}.");
                 }
 
-                $barang = Barang::lockForUpdate()->find($item['barang_id']);
-                if (!$barang) {
-                    throw new \Exception("Barang dengan ID {$item['barang_id']} tidak ditemukan.");
-                }
-                
-                if ($item['jumlah'] <= 0) {
-                    throw new \Exception("Jumlah barang {$barang->nama_barang} harus lebih dari 0");
-                }
-                
-                if ($item['jumlah'] > $barang->stok) {
-                    throw new \Exception("Stok barang {$barang->nama_barang} tidak mencukupi. Sisa stok: {$barang->stok}, diminta: {$item['jumlah']}");
-                }
-                
-                // Use current price from database, not from frontend
-                $hargaSatuan = $barang->harga_jual;
-                $subtotal = $hargaSatuan * $item['jumlah'];
-                $totalHargaKeseluruhan += $subtotal;
+                // Gunakan bcmath untuk kalkulasi presisi
+                $subTotal = bcmul($item->harga_jual, $barang['jumlah'], 2);
+                $totalHarga = bcadd($totalHarga, $subTotal, 2);
 
-                $detailItemsData[] = [
-                    'barang' => $barang,
-                    'data' => [
-                        'barang_id' => $barang->id,
-                        'jumlah' => $item['jumlah'],
-                        'harga_satuan' => $hargaSatuan,
-                        'subtotal' => $subtotal,
-                        'created_at' => now(),
-                        'updated_at' => now(),
-                    ]
+                // Siapkan data untuk detail pembelian
+                $detailsToInsert[] = [
+                    'barang_id' => $item->id,
+                    'jumlah' => $barang['jumlah'],
+                    'harga_satuan' => $item->harga_jual,
+                    'subtotal' => $subTotal,
+                    'created_at' => now(),
+                    'updated_at' => now(),
                 ];
+            
+                // Kurangi stok pada object, akan di-save nanti
+                $item->stok -= $barang['jumlah'];
             }
 
-            if ($totalHargaKeseluruhan <= 0) {
-                throw new \Exception('Total harga transaksi tidak valid');
-            }
+            // Generate kode pembelian
+            $kodePembelian = $this->generateUniqueTransactionCode($validated['tanggal_pembelian']);
 
-            // 2. Tentukan status pembayaran & proses pembayaran
-            $statusPembayaran = 'lunas';
-            $totalBayarAwal = 0;
+            // Tentukan status pembayaran dan total bayar
+            $statusPembayaran = 'belum_lunas';
+            $totalBayar = 0;
             $kembalian = 0;
-            $simpananSukarelaRecordId = null;
 
-            if ($validatedData['metode_pembayaran'] == 'tunai') {
-                $totalBayarAwal = floatval($validatedData['total_bayar_manual'] ?? 0);
-                if ($totalBayarAwal < $totalHargaKeseluruhan) {
-                    throw new \Exception('Jumlah pembayaran tunai kurang dari total harga. Total: Rp ' . number_format($totalHargaKeseluruhan) . ', Dibayar: Rp ' . number_format($totalBayarAwal));
-                }
-                $kembalian = $totalBayarAwal - $totalHargaKeseluruhan;
-                
-            } elseif ($validatedData['metode_pembayaran'] == 'saldo_sukarela') {
-                $anggota = User::find($validatedData['user_id']);
-                $transaksiTerakhirSukarela = $anggota->simpananSukarelas()
-                                                   ->latest('tanggal_transaksi')
-                                                   ->latest('created_at')
-                                                   ->first();
-                $saldoSukarela = $transaksiTerakhirSukarela ? $transaksiTerakhirSukarela->saldo_sesudah : 0;
-
-                if ($totalHargaKeseluruhan > $saldoSukarela) {
-                    throw new \Exception("Saldo simpanan sukarela anggota tidak mencukupi. Saldo tersedia: Rp " . number_format($saldoSukarela) . ", Dibutuhkan: Rp " . number_format($totalHargaKeseluruhan));
-                }
-                
-                // Create withdrawal record
-                $penarikan = SimpananSukarela::create([
-                    'user_id' => $anggota->id,
-                    'tipe_transaksi' => 'tarik',
-                    'jumlah' => $totalHargaKeseluruhan,
-                    'saldo_sebelum' => $saldoSukarela,
-                    'saldo_sesudah' => $saldoSukarela - $totalHargaKeseluruhan,
-                    'tanggal_transaksi' => Carbon::parse($validatedData['tanggal_pembelian'])->format('Y-m-d'),
-                    'pengurus_id' => $kasirId,
-                    'keterangan' => 'PENDING_KODE_PEMBELIAN', 
-                ]);
-                $simpananSukarelaRecordId = $penarikan->id;
-                $totalBayarAwal = $totalHargaKeseluruhan;
-                
-            } elseif ($validatedData['metode_pembayaran'] == 'hutang') {
-                $totalBayarAwal = floatval($validatedData['uang_muka'] ?? 0);
-                
-                if ($totalBayarAwal >= $totalHargaKeseluruhan) {
+            if ($validated['metode_pembayaran'] === 'tunai') {
+                $totalBayar = $validated['total_bayar_manual'] ?? 0;
+                if ($totalBayar >= $totalHarga) {
                     $statusPembayaran = 'lunas';
-                    $kembalian = $totalBayarAwal - $totalHargaKeseluruhan;
-                } elseif ($totalBayarAwal > 0) {
-                    $statusPembayaran = 'cicilan';
-                } else {
-                    $statusPembayaran = 'belum_lunas';
+                    $kembalian = $totalBayar - $totalHarga;
                 }
+            } elseif ($validated['metode_pembayaran'] === 'saldo_sukarela') {
+                // Cek saldo sukarela
+                $anggota = User::find($validated['anggota_id']);
+                $transaksiTerakhir = $anggota->simpananSukarelas()
+                                            ->latest('tanggal_transaksi')
+                                            ->latest('created_at')
+                                            ->first();
+            
+                $saldoSukarela = $transaksiTerakhir ? $transaksiTerakhir->saldo_sesudah : 0;
+            
+                if ($saldoSukarela >= $totalHarga) {
+                    $statusPembayaran = 'lunas';
+                    $totalBayar = $totalHarga;
+                
+                    // Kurangi saldo sukarela
+                    SimpananSukarela::create([
+                        'user_id' => $anggota->id,
+                        'tipe_transaksi' => 'tarik',
+                        'jumlah' => $totalHarga,
+                        'saldo_sebelum' => $saldoSukarela,
+                        'saldo_sesudah' => $saldoSukarela - $totalHarga,
+                        'tanggal_transaksi' => $validated['tanggal_pembelian'],
+                        'pengurus_id' => Auth::id(),
+                        'keterangan' => "Pembayaran transaksi {$kodePembelian}",
+                    ]);
+                } else {
+                    throw new \Exception("Saldo sukarela tidak mencukupi. Saldo tersedia: Rp " . number_format($saldoSukarela, 0, ',', '.'));
+                }
+            } elseif ($validated['metode_pembayaran'] === 'hutang') {
+                $statusPembayaran = 'cicilan';
+                $totalBayar = $validated['uang_muka'] ?? 0;
             }
-            
-            // 3. Generate unique transaction code
-            $kodePembelian = $this->generateUniqueTransactionCode($validatedData['tanggal_pembelian']);
-            
-            // 4. Create Pembelian record
+
+            // 3. Buat entri pembelian
             $pembelian = Pembelian::create([
                 'kode_pembelian' => $kodePembelian,
-                'user_id' => $validatedData['user_id'],
-                'kasir_id' => $kasirId,
-                'tanggal_pembelian' => Carbon::parse($validatedData['tanggal_pembelian'])->format('Y-m-d H:i:s'),
-                'total_harga' => $totalHargaKeseluruhan,
-                'total_bayar' => $totalBayarAwal,
+                'user_id' => $validated['anggota_id'],
+                'kasir_id' => Auth::id(),
+                'tanggal_pembelian' => $validated['tanggal_pembelian'],
+                'total_harga' => $totalHarga,
+                'total_bayar' => $totalBayar,
                 'kembalian' => $kembalian,
                 'status_pembayaran' => $statusPembayaran,
-                'metode_pembayaran' => $validatedData['metode_pembayaran'],
-                'catatan' => $validatedData['catatan'],
+                'metode_pembayaran' => $validated['metode_pembayaran'],
+                'catatan' => $validated['catatan'] ?? null,
             ]);
 
-            // Update simpanan sukarela record with transaction code
-            if ($simpananSukarelaRecordId) {
-                SimpananSukarela::find($simpananSukarelaRecordId)->update([
-                    'keterangan' => "Pembayaran pembelian No. {$kodePembelian}"
-                ]);
-            }
-
-            // 5. Create DetailPembelian records and update stock
-            $detailPembelianRecords = [];
-            foreach ($detailItemsData as $itemData) {
-                $detail = $itemData['data'];
+            // Tambahkan pembelian_id ke setiap detail
+            $detailsWithPembelianId = array_map(function ($detail) use ($pembelian) {
                 $detail['pembelian_id'] = $pembelian->id;
-                $detailPembelianRecords[] = $detail;
-                
-                $barang = $itemData['barang'];
-                $stokSebelum = $barang->stok;
-                $barang->stok -= $detail['jumlah'];
-                $barang->save();
+                return $detail;
+            }, $detailsToInsert);
 
-                // Create stock history
-                HistoriStok::create([
-                    'barang_id' => $barang->id,
-                    'user_id' => $kasirId,
-                    'tipe' => 'keluar',
-                    'jumlah' => $detail['jumlah'],
-                    'stok_sebelum' => $stokSebelum,
-                    'stok_sesudah' => $barang->stok,
-                    'keterangan' => "Penjualan No. {$pembelian->kode_pembelian}",
-                ]);
+            // 4. Insert semua detail pembelian dalam satu query
+            DetailPembelian::insert($detailsWithPembelianId);
+
+            // 5. Update stok semua barang yang berubah
+            foreach ($barangsFromDB as $item) {
+                $item->save();
             }
-            
-            // Bulk insert detail pembelian
-            DetailPembelian::insert($detailPembelianRecords);
 
             DB::commit();
-            
-            return redirect()->route('pengurus.transaksi-pembelian.show', $pembelian->id)
-                           ->with('success', "Transaksi pembelian {$pembelian->kode_pembelian} berhasil dicatat dengan total Rp " . number_format($totalHargaKeseluruhan));
-                           
+            return redirect()->route('pengurus.transaksi-pembelian.index')->with('success', 'Transaksi berhasil ditambahkan dengan kode: ' . $kodePembelian);
+
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error("Error saat menyimpan pembelian: " . $e->getMessage() . "\nStack Trace:\n" . $e->getTraceAsString());
-            return redirect()->back()->withInput()->with('error', 'Gagal mencatat transaksi pembelian: ' . $e->getMessage());
+            Log::error('Error creating transaction: ' . $e->getMessage());
+            return back()->with('error', 'Gagal membuat transaksi: ' . $e->getMessage())->withInput();
         }
     }
 
