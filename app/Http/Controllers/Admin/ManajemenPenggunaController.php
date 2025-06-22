@@ -10,6 +10,7 @@ use Illuminate\Validation\Rules\Password as PasswordRule;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 class ManajemenPenggunaController extends Controller
 {
@@ -115,8 +116,8 @@ class ManajemenPenggunaController extends Controller
     {
         $validatedData = $request->validate([
             'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'string', 'email', 'max:255', Rule::unique('users', 'email')->whereNull('deleted_at')],
-            'nomor_anggota' => ['nullable', 'string', 'max:50', Rule::unique('users', 'nomor_anggota')->whereNull('deleted_at')],
+            'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
+            'nomor_anggota' => ['nullable', 'string', 'max:50', 'unique:users,nomor_anggota'],
             'password' => ['required', 'confirmed', PasswordRule::min(8)->mixedCase()->numbers()->symbols()],
             'role' => ['required', 'string', Rule::in(['admin', 'pengurus', 'anggota'])],
             'status' => ['required', 'string', Rule::in(['active', 'inactive'])],
@@ -127,7 +128,7 @@ class ManajemenPenggunaController extends Controller
                 'name' => $validatedData['name'],
                 'email' => $validatedData['email'],
                 'nomor_anggota' => $validatedData['nomor_anggota'],
-                'password' => Hash::make($validatedData['password']), // Fix: Hash password
+                'password' => Hash::make($validatedData['password']),
                 'role' => $validatedData['role'],
                 'status' => $validatedData['status'],
                 'email_verified_at' => now(),
@@ -165,8 +166,8 @@ class ManajemenPenggunaController extends Controller
     {
         $validatedData = $request->validate([
             'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'string', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)->whereNull('deleted_at')],
-            'nomor_anggota' => ['nullable', 'string', 'max:50', Rule::unique('users', 'nomor_anggota')->ignore($user->id)->whereNull('deleted_at')],
+            'email' => ['required', 'string', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
+            'nomor_anggota' => ['nullable', 'string', 'max:50', Rule::unique('users', 'nomor_anggota')->ignore($user->id)],
             'role' => ['required', 'string', Rule::in(['admin', 'pengurus', 'anggota'])],
             'status' => ['required', 'string', Rule::in(['active', 'inactive'])],
             'password' => ['nullable', 'confirmed', PasswordRule::min(8)->mixedCase()->numbers()->symbols()],
@@ -180,7 +181,7 @@ class ManajemenPenggunaController extends Controller
             $user->status = $validatedData['status'];
 
             if (!empty($validatedData['password'])) {
-                $user->password = Hash::make($validatedData['password']); // Fix: Hash password
+                $user->password = Hash::make($validatedData['password']);
             }
             $user->save();
 
@@ -193,31 +194,112 @@ class ManajemenPenggunaController extends Controller
 
     /**
      * Remove the specified resource from storage.
+     * FIXED: Menggunakan hard delete untuk menghapus data sepenuhnya dari database
      */
     public function destroy(User $user)
     {
+        // Cek apakah user mencoba menghapus dirinya sendiri
         if (Auth::id() === $user->id) {
-             return redirect()->route('admin.manajemen-pengguna.index')->with('error', 'Anda tidak dapat menghapus akun Anda sendiri.');
+            return redirect()->route('admin.manajemen-pengguna.index')
+                ->with('error', 'Anda tidak dapat menghapus akun Anda sendiri.');
         }
         
-        // Fix: Check if user is admin and prevent deleting last admin
-        if ($user->role === 'admin' && User::where('role', 'admin')->whereNull('deleted_at')->count() === 1) {
-            return redirect()->route('admin.manajemen-pengguna.index')->with('error', 'Tidak dapat menghapus admin aktif terakhir.');
+        // Cek apakah ini admin terakhir
+        if ($user->role === 'admin' && User::where('role', 'admin')->count() === 1) {
+            return redirect()->route('admin.manajemen-pengguna.index')
+                ->with('error', 'Tidak dapat menghapus admin aktif terakhir.');
         }
 
         try {
-            $user->delete(); 
-            return redirect()->route('admin.manajemen-pengguna.index')->with('success', 'Pengguna berhasil dihapus.');
-        } 
-        catch (\Illuminate\Database\QueryException $e) { 
-            Log::error("Gagal hapus pengguna (QueryException) #{$user->id}: " . $e->getMessage());
-            if (str_contains($e->getMessage(), 'foreign key constraint fails')) {
-                 return redirect()->route('admin.manajemen-pengguna.index')->with('error', 'Tidak dapat menghapus pengguna karena masih memiliki data terkait aktif.');
+            // Mulai database transaction untuk memastikan konsistensi data
+            DB::beginTransaction();
+            
+            // Simpan informasi user untuk logging
+            $userName = $user->name;
+            $userEmail = $user->email;
+            $userId = $user->id;
+            
+            // HARD DELETE: Hapus data sepenuhnya dari database
+            // Ini akan menghapus record secara permanen, bukan soft delete
+            $deleted = $user->forceDelete();
+            
+            if (!$deleted) {
+                throw new \Exception('Gagal menghapus data user dari database');
             }
-            return redirect()->route('admin.manajemen-pengguna.index')->with('error', 'Gagal menghapus pengguna. Terjadi kesalahan database.');
+            
+            // Commit transaction jika berhasil
+            DB::commit();
+            
+            // Log aktivitas penghapusan
+            Log::info("User berhasil dihapus - ID: {$userId}, Nama: {$userName}, Email: {$userEmail}", [
+                'deleted_by' => Auth::user()->name,
+                'deleted_at' => now(),
+                'action' => 'hard_delete_user'
+            ]);
+            
+            return redirect()->route('admin.manajemen-pengguna.index')
+                ->with('success', "Pengguna '{$userName}' berhasil dihapus secara permanen dari sistem.");
+                
+        } catch (\Illuminate\Database\QueryException $e) {
+            // Rollback transaction jika ada error
+            DB::rollback();
+            
+            Log::error("Gagal hapus pengguna (QueryException) #{$user->id}: " . $e->getMessage(), [
+                'user_id' => $user->id,
+                'error_code' => $e->getCode(),
+                'sql_state' => $e->errorInfo[0] ?? null
+            ]);
+            
+            // Handle foreign key constraint errors
+            if (str_contains($e->getMessage(), 'foreign key constraint fails') || 
+                str_contains($e->getMessage(), 'FOREIGN KEY constraint failed')) {
+                return redirect()->route('admin.manajemen-pengguna.index')
+                    ->with('error', 'Tidak dapat menghapus pengguna karena masih memiliki data terkait di sistem. Silakan hapus data terkait terlebih dahulu.');
+            }
+            
+            // Handle other database errors
+            return redirect()->route('admin.manajemen-pengguna.index')
+                ->with('error', 'Gagal menghapus pengguna karena terjadi kesalahan database. Silakan coba lagi atau hubungi administrator.');
+                
         } catch (\Exception $e) {
-            Log::error("Gagal hapus pengguna #{$user->id}: " . $e->getMessage());
-            return redirect()->route('admin.manajemen-pengguna.index')->with('error', 'Gagal menghapus pengguna. Silakan coba lagi.');
+            // Rollback transaction jika ada error
+            DB::rollback();
+            
+            Log::error("Gagal hapus pengguna #{$user->id}: " . $e->getMessage(), [
+                'user_id' => $user->id,
+                'error_message' => $e->getMessage(),
+                'stack_trace' => $e->getTraceAsString()
+            ]);
+            
+            return redirect()->route('admin.manajemen-pengguna.index')
+                ->with('error', 'Gagal menghapus pengguna. Terjadi kesalahan sistem. Silakan coba lagi.');
+        }
+    }
+
+    /**
+     * Method tambahan untuk membersihkan data user yang sudah soft deleted
+     * Bisa dipanggil secara manual jika diperlukan
+     */
+    public function cleanupSoftDeletedUsers()
+    {
+        try {
+            // Hapus semua user yang sudah di-soft delete
+            $deletedCount = User::onlyTrashed()->forceDelete();
+            
+            Log::info("Cleanup soft deleted users completed", [
+                'deleted_count' => $deletedCount,
+                'cleaned_by' => Auth::user()->name,
+                'cleaned_at' => now()
+            ]);
+            
+            return redirect()->route('admin.manajemen-pengguna.index')
+                ->with('success', "Berhasil membersihkan {$deletedCount} data pengguna yang sudah dihapus.");
+                
+        } catch (\Exception $e) {
+            Log::error("Gagal cleanup soft deleted users: " . $e->getMessage());
+            
+            return redirect()->route('admin.manajemen-pengguna.index')
+                ->with('error', 'Gagal membersihkan data. Silakan coba lagi.');
         }
     }
 }

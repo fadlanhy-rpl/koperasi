@@ -22,11 +22,10 @@ class TransaksiPembelianController extends Controller
     public function __construct()
     {
         // Middleware sudah diterapkan pada level route group
-        // $this->middleware(['auth', 'role:admin,pengurus']);
     }
 
     /**
-     * Menampilkan daftar transaksi pembelian yang pernah terjadi.
+     * Display a listing of the resource.
      */
     public function index(Request $request)
     {
@@ -109,34 +108,206 @@ class TransaksiPembelianController extends Controller
     }
 
     /**
-     * Menampilkan form untuk membuat transaksi pembelian baru (Point of Sale).
+     * Show the form for creating a new resource.
      */
     public function create()
     {
-        $anggota = User::where('role', 'anggota')->orderBy('name')->get(['id', 'name', 'nomor_anggota']);
-        $barangs = Barang::where('stok', '>', 0)
-                         ->orderBy('nama_barang')
-                         ->get(['id', 'nama_barang', 'kode_barang', 'harga_jual', 'stok', 'satuan']);
-        
-        return view('pengurus.transaksi_pembelian.create', compact('anggota', 'barangs'));
+        try {
+            $anggota = User::where('role', 'anggota')
+                          ->orderBy('name')
+                          ->get(['id', 'name', 'nomor_anggota']);
+            
+            $barangs = Barang::where('stok', '>', 0)
+                            ->orderBy('nama_barang')
+                            ->get(['id', 'nama_barang', 'kode_barang', 'harga_jual', 'stok', 'satuan']);
+            
+            return view('pengurus.transaksi_pembelian.create', compact('anggota', 'barangs'));
+            
+        } catch (\Exception $e) {
+            Log::error('Error in TransaksiPembelianController@create: ' . $e->getMessage());
+            return back()->with('error', 'Gagal memuat halaman POS: ' . $e->getMessage());
+        }
     }
 
     /**
-     * Menyimpan transaksi pembelian baru.
+     * API endpoint untuk mendapatkan saldo sukarela anggota
+     */
+    public function getSaldoSukarela(Request $request)
+    {
+        try {
+            // Validate CSRF token for AJAX requests
+            // if ($request->ajax() && !$request->hasValidSignature()) {
+            //     // Check CSRF token manually for AJAX requests
+            //     $token = $request->header('X-CSRF-TOKEN') ?: $request->input('_token');
+            //     if (!hash_equals(session()->token(), $token)) {
+            //         return response()->json([
+            //             'success' => false,
+            //             'message' => 'CSRF token mismatch',
+            //             'reload' => true
+            //         ], 419);
+            //     }
+            // }
+
+            $request->validate([
+                'user_id' => 'required|exists:users,id'
+            ]);
+
+            $anggota = User::find($request->user_id);
+            if (!$anggota || $anggota->role !== 'anggota') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Anggota tidak ditemukan'
+                ], 404);
+            }
+
+            // Ambil saldo terakhir dari simpanan sukarela
+            $transaksiTerakhir = $anggota->simpananSukarelas()
+                                        ->latest('tanggal_transaksi')
+                                        ->latest('created_at')
+                                        ->first();
+            
+            $saldoSukarela = $transaksiTerakhir ? $transaksiTerakhir->saldo_sesudah : 0;
+
+            return response()->json([
+                'success' => true,
+                'saldo' => $saldoSukarela,
+                'saldo_formatted' => 'Rp ' . number_format($saldoSukarela, 0, ',', '.'),
+                'anggota' => [
+                    'id' => $anggota->id,
+                    'name' => $anggota->name,
+                    'nomor_anggota' => $anggota->nomor_anggota
+                ]
+            ]);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Data tidak valid',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('Error getting saldo sukarela: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mengambil data saldo sukarela',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * API endpoint untuk validasi stok barang
+     */
+    public function validateStock(Request $request)
+    {
+        try {
+            // Validate CSRF token for AJAX requests
+            // if ($request->ajax()) {
+            //     $token = $request->header('X-CSRF-TOKEN') ?: $request->input('_token');
+            //     if (!hash_equals(session()->token(), $token)) {
+            //         return response()->json([
+            //             'success' => false,
+            //             'message' => 'CSRF token mismatch',
+            //             'reload' => true
+            //         ], 419);
+            //     }
+            // }
+
+            $request->validate([
+                'items' => 'required|array',
+                'items.*.barang_id' => 'required|exists:barangs,id',
+                'items.*.jumlah' => 'required|integer|min:1'
+            ]);
+
+            $validationResults = [];
+            $allValid = true;
+
+            foreach ($request->items as $item) {
+                $barang = Barang::find($item['barang_id']);
+                $isValid = $barang && $item['jumlah'] <= $barang->stok;
+                
+                if (!$isValid) {
+                    $allValid = false;
+                }
+
+                $validationResults[] = [
+                    'barang_id' => $item['barang_id'],
+                    'nama_barang' => $barang ? $barang->nama_barang : 'Tidak ditemukan',
+                    'jumlah_diminta' => $item['jumlah'],
+                    'stok_tersedia' => $barang ? $barang->stok : 0,
+                    'valid' => $isValid,
+                    'message' => $isValid ? 'Stok mencukupi' : 'Stok tidak mencukupi'
+                ];
+            }
+
+            return response()->json([
+                'success' => true,
+                'all_valid' => $allValid,
+                'items' => $validationResults
+            ]);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Data tidak valid',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('Error validating stock: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal memvalidasi stok',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Store a newly created resource in storage.
      */
     public function store(Request $request)
     {
-        $validatedData = $request->validate([
-            'user_id' => ['required', Rule::exists('users', 'id')->where('role', 'anggota')],
-            'tanggal_pembelian' => ['required', 'date'],
-            'metode_pembayaran' => ['required', Rule::in(['tunai', 'saldo_sukarela', 'hutang'])],
-            'items' => ['required', 'array', 'min:1'],
-            'items.*.barang_id' => ['required', 'exists:barangs,id'],
-            'items.*.jumlah' => ['required', 'integer', 'min:1'],
-            'total_bayar_manual' => ['nullable', 'numeric', 'min:0'],
-            'uang_muka' => ['nullable', 'numeric', 'min:0'],
-            'catatan' => ['nullable', 'string', 'max:1000'],
-        ]);
+        // Enhanced validation with better error messages
+        try {
+            $validatedData = $request->validate([
+                'user_id' => ['required', Rule::exists('users', 'id')->where('role', 'anggota')],
+                'tanggal_pembelian' => ['required', 'date', 'before_or_equal:today'],
+                'metode_pembayaran' => ['required', Rule::in(['tunai', 'saldo_sukarela', 'hutang'])],
+                'items' => ['required', 'json'],
+                'total_bayar_manual' => ['nullable', 'numeric', 'min:0'],
+                'uang_muka' => ['nullable', 'numeric', 'min:0'],
+                'catatan' => ['nullable', 'string', 'max:1000'],
+            ], [
+                'user_id.required' => 'Pilih anggota pembeli',
+                'user_id.exists' => 'Anggota yang dipilih tidak valid',
+                'tanggal_pembelian.required' => 'Tanggal transaksi harus diisi',
+                'tanggal_pembelian.before_or_equal' => 'Tanggal transaksi tidak boleh lebih dari hari ini',
+                'metode_pembayaran.required' => 'Pilih metode pembayaran',
+                'metode_pembayaran.in' => 'Metode pembayaran tidak valid',
+                'items.required' => 'Pilih minimal satu barang',
+                'items.json' => 'Format data barang tidak valid',
+                'total_bayar_manual.numeric' => 'Jumlah pembayaran harus berupa angka',
+                'total_bayar_manual.min' => 'Jumlah pembayaran tidak boleh negatif',
+                'uang_muka.numeric' => 'Uang muka harus berupa angka',
+                'uang_muka.min' => 'Uang muka tidak boleh negatif',
+                'catatan.max' => 'Catatan maksimal 1000 karakter',
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return redirect()->back()
+                           ->withInput()
+                           ->withErrors($e->errors())
+                           ->with('error', 'Data yang dimasukkan tidak valid. Silakan periksa kembali.');
+        }
+
+        // Parse items JSON
+        try {
+            $items = json_decode($validatedData['items'], true);
+            if (!is_array($items) || empty($items)) {
+                throw new \Exception('Data barang tidak valid atau kosong');
+            }
+        } catch (\Exception $e) {
+            return redirect()->back()->withInput()->with('error', 'Format data barang tidak valid: ' . $e->getMessage());
+        }
 
         $kasirId = Auth::id();
         $totalHargaKeseluruhan = 0;
@@ -145,15 +316,26 @@ class TransaksiPembelianController extends Controller
         DB::beginTransaction();
         try {
             // 1. Validasi stok dan hitung total harga dari DB
-            foreach ($validatedData['items'] as $item) {
-                $barang = Barang::find($item['barang_id']);
+            foreach ($items as $item) {
+                // Validate item structure
+                if (!isset($item['barang_id']) || !isset($item['jumlah']) || !isset($item['harga_satuan'])) {
+                    throw new \Exception('Struktur data barang tidak lengkap');
+                }
+
+                $barang = Barang::lockForUpdate()->find($item['barang_id']);
                 if (!$barang) {
                     throw new \Exception("Barang dengan ID {$item['barang_id']} tidak ditemukan.");
                 }
-                if ($item['jumlah'] > $barang->stok) {
-                    throw new \Exception("Stok barang {$barang->nama_barang} tidak mencukupi. Sisa stok: {$barang->stok}");
+                
+                if ($item['jumlah'] <= 0) {
+                    throw new \Exception("Jumlah barang {$barang->nama_barang} harus lebih dari 0");
                 }
                 
+                if ($item['jumlah'] > $barang->stok) {
+                    throw new \Exception("Stok barang {$barang->nama_barang} tidak mencukupi. Sisa stok: {$barang->stok}, diminta: {$item['jumlah']}");
+                }
+                
+                // Use current price from database, not from frontend
                 $hargaSatuan = $barang->harga_jual;
                 $subtotal = $hargaSatuan * $item['jumlah'];
                 $totalHargaKeseluruhan += $subtotal;
@@ -171,6 +353,10 @@ class TransaksiPembelianController extends Controller
                 ];
             }
 
+            if ($totalHargaKeseluruhan <= 0) {
+                throw new \Exception('Total harga transaksi tidak valid');
+            }
+
             // 2. Tentukan status pembayaran & proses pembayaran
             $statusPembayaran = 'lunas';
             $totalBayarAwal = 0;
@@ -178,20 +364,25 @@ class TransaksiPembelianController extends Controller
             $simpananSukarelaRecordId = null;
 
             if ($validatedData['metode_pembayaran'] == 'tunai') {
-                $totalBayarAwal = $validatedData['total_bayar_manual'] ?? 0;
+                $totalBayarAwal = floatval($validatedData['total_bayar_manual'] ?? 0);
                 if ($totalBayarAwal < $totalHargaKeseluruhan) {
-                    throw new \Exception('Jumlah pembayaran tunai kurang dari total harga.');
+                    throw new \Exception('Jumlah pembayaran tunai kurang dari total harga. Total: Rp ' . number_format($totalHargaKeseluruhan) . ', Dibayar: Rp ' . number_format($totalBayarAwal));
                 }
                 $kembalian = $totalBayarAwal - $totalHargaKeseluruhan;
+                
             } elseif ($validatedData['metode_pembayaran'] == 'saldo_sukarela') {
                 $anggota = User::find($validatedData['user_id']);
-                $transaksiTerakhirSukarela = $anggota->simpananSukarelas()->latest('tanggal_transaksi')->latest('created_at')->first();
+                $transaksiTerakhirSukarela = $anggota->simpananSukarelas()
+                                                   ->latest('tanggal_transaksi')
+                                                   ->latest('created_at')
+                                                   ->first();
                 $saldoSukarela = $transaksiTerakhirSukarela ? $transaksiTerakhirSukarela->saldo_sesudah : 0;
 
                 if ($totalHargaKeseluruhan > $saldoSukarela) {
-                    throw new \Exception("Saldo simpanan sukarela anggota tidak mencukupi. Saldo tersedia: Rp " . number_format($saldoSukarela));
+                    throw new \Exception("Saldo simpanan sukarela anggota tidak mencukupi. Saldo tersedia: Rp " . number_format($saldoSukarela) . ", Dibutuhkan: Rp " . number_format($totalHargaKeseluruhan));
                 }
                 
+                // Create withdrawal record
                 $penarikan = SimpananSukarela::create([
                     'user_id' => $anggota->id,
                     'tipe_transaksi' => 'tarik',
@@ -204,21 +395,24 @@ class TransaksiPembelianController extends Controller
                 ]);
                 $simpananSukarelaRecordId = $penarikan->id;
                 $totalBayarAwal = $totalHargaKeseluruhan;
+                
             } elseif ($validatedData['metode_pembayaran'] == 'hutang') {
-                $statusPembayaran = 'cicilan';
-                $totalBayarAwal = $validatedData['uang_muka'] ?? 0;
+                $totalBayarAwal = floatval($validatedData['uang_muka'] ?? 0);
+                
                 if ($totalBayarAwal >= $totalHargaKeseluruhan) {
                     $statusPembayaran = 'lunas';
                     $kembalian = $totalBayarAwal - $totalHargaKeseluruhan;
-                } elseif ($totalBayarAwal > 0 && $totalBayarAwal < $totalHargaKeseluruhan) {
+                } elseif ($totalBayarAwal > 0) {
                     $statusPembayaran = 'cicilan';
                 } else {
-                    $statusPembayaran = 'cicilan';
+                    $statusPembayaran = 'belum_lunas';
                 }
             }
             
-            // 3. Buat record Pembelian
-            $kodePembelian = 'INV/' . Carbon::parse($validatedData['tanggal_pembelian'])->format('Ymd') . '/' . strtoupper(Str::random(5));
+            // 3. Generate unique transaction code
+            $kodePembelian = $this->generateUniqueTransactionCode($validatedData['tanggal_pembelian']);
+            
+            // 4. Create Pembelian record
             $pembelian = Pembelian::create([
                 'kode_pembelian' => $kodePembelian,
                 'user_id' => $validatedData['user_id'],
@@ -232,11 +426,14 @@ class TransaksiPembelianController extends Controller
                 'catatan' => $validatedData['catatan'],
             ]);
 
+            // Update simpanan sukarela record with transaction code
             if ($simpananSukarelaRecordId) {
-                SimpananSukarela::find($simpananSukarelaRecordId)->update(['keterangan' => "Pembayaran pembelian No. {$kodePembelian}"]);
+                SimpananSukarela::find($simpananSukarelaRecordId)->update([
+                    'keterangan' => "Pembayaran pembelian No. {$kodePembelian}"
+                ]);
             }
 
-            // 4. Buat record DetailPembelian dan update stok barang + histori stok
+            // 5. Create DetailPembelian records and update stock
             $detailPembelianRecords = [];
             foreach ($detailItemsData as $itemData) {
                 $detail = $itemData['data'];
@@ -248,6 +445,7 @@ class TransaksiPembelianController extends Controller
                 $barang->stok -= $detail['jumlah'];
                 $barang->save();
 
+                // Create stock history
                 HistoriStok::create([
                     'barang_id' => $barang->id,
                     'user_id' => $kasirId,
@@ -258,10 +456,15 @@ class TransaksiPembelianController extends Controller
                     'keterangan' => "Penjualan No. {$pembelian->kode_pembelian}",
                 ]);
             }
+            
+            // Bulk insert detail pembelian
             DetailPembelian::insert($detailPembelianRecords);
 
             DB::commit();
-            return redirect()->route('pengurus.transaksi-pembelian.show', $pembelian->id)->with('success', "Transaksi pembelian {$pembelian->kode_pembelian} berhasil dicatat.");
+            
+            return redirect()->route('pengurus.transaksi-pembelian.show', $pembelian->id)
+                           ->with('success', "Transaksi pembelian {$pembelian->kode_pembelian} berhasil dicatat dengan total Rp " . number_format($totalHargaKeseluruhan));
+                           
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error("Error saat menyimpan pembelian: " . $e->getMessage() . "\nStack Trace:\n" . $e->getTraceAsString());
@@ -269,6 +472,33 @@ class TransaksiPembelianController extends Controller
         }
     }
 
+    /**
+     * Generate unique transaction code
+     */
+    private function generateUniqueTransactionCode($tanggal)
+    {
+        $datePrefix = Carbon::parse($tanggal)->format('Ymd');
+        $attempts = 0;
+        $maxAttempts = 10;
+        
+        do {
+            $randomSuffix = strtoupper(Str::random(5));
+            $kodePembelian = "INV/{$datePrefix}/{$randomSuffix}";
+            $exists = Pembelian::where('kode_pembelian', $kodePembelian)->exists();
+            $attempts++;
+        } while ($exists && $attempts < $maxAttempts);
+        
+        if ($exists) {
+            // Fallback with timestamp
+            $kodePembelian = "INV/{$datePrefix}/" . strtoupper(Str::random(3)) . time();
+        }
+        
+        return $kodePembelian;
+    }
+
+    /**
+     * Display the specified resource.
+     */
     public function show(Pembelian $pembelian)
     {
         $pembelian->load(['user:id,name,nomor_anggota', 'kasir:id,name', 'detailPembelians.barang', 'cicilans.pengurus:id,name']);
@@ -278,8 +508,39 @@ class TransaksiPembelianController extends Controller
             $totalSudahBayarCicilan = $pembelian->cicilans->sum('jumlah_bayar');
             $pembayaranAwal = $pembelian->total_bayar; 
             $sisaTagihan = $pembelian->total_harga - $pembayaranAwal - $totalSudahBayarCicilan;
+            $sisaTagihan = max(0, $sisaTagihan); // Ensure non-negative
         }
 
         return view('pengurus.transaksi_pembelian.show', compact('pembelian', 'sisaTagihan'));
+    }
+
+    /**
+     * Show the form for editing the specified resource.
+     */
+    public function edit(Pembelian $pembelian)
+    {
+        // Implementation for edit if needed
+        return redirect()->route('pengurus.transaksi-pembelian.show', $pembelian->id)
+                        ->with('info', 'Edit transaksi belum tersedia');
+    }
+
+    /**
+     * Update the specified resource in storage.
+     */
+    public function update(Request $request, Pembelian $pembelian)
+    {
+        // Implementation for update if needed
+        return redirect()->route('pengurus.transaksi-pembelian.show', $pembelian->id)
+                        ->with('info', 'Update transaksi belum tersedia');
+    }
+
+    /**
+     * Remove the specified resource from storage.
+     */
+    public function destroy(Pembelian $pembelian)
+    {
+        // Implementation for delete if needed (usually not allowed for transactions)
+        return redirect()->route('pengurus.transaksi-pembelian.index')
+                        ->with('error', 'Hapus transaksi tidak diizinkan');
     }
 }
